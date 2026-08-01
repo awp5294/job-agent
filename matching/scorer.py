@@ -47,18 +47,13 @@ Only score ≥70 should be included in a digest. Be honest and specific."""
         return 50, "Could not score automatically."
 
 
-def score_jobs_for_user(job_ids: list[int], criteria: dict) -> list[tuple[int, int, str]]:
-    """Returns list of (job_id, score, reason) for jobs scoring ≥70."""
-    from db.database import get_conn
-    conn = get_conn()
+def score_jobs_for_user(all_jobs: list[dict], user_id: int, criteria: dict) -> list[tuple[dict, int, str]]:
+    """Returns list of (job_dict, score, reason) for jobs scoring ≥70."""
     results = []
-    for job_id in job_ids:
-        row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-        if not row:
+    for job in all_jobs:
+        if not job.get("id"):
             continue
-        job = dict(row)
         score, reason = score_job(job, criteria)
         if score >= 70:
-            results.append((job_id, score, reason))
-    conn.close()
+            results.append((job, score, reason))
     return results
