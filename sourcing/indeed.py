@@ -1,9 +1,14 @@
-"""Indeed scraper using httpx + BeautifulSoup."""
-import httpx
+"""Indeed scraper.
+
+Indeed actively blocks scrapers, so treat an empty result as normal rather than
+as a bug — the digest reports it as a note. Greenhouse and Lever are the
+reliable sources; this one is a bonus.
+"""
 import hashlib
 import time
+
+import httpx
 from bs4 import BeautifulSoup
-from db.database import upsert_job
 
 HEADERS = {
     "User-Agent": (
@@ -13,94 +18,69 @@ HEADERS = {
     )
 }
 
+MAX_TITLES = 3
+MAX_LOCATIONS = 2
+MAX_CARDS = 10
+
 
 def _make_id(title: str, company: str, url: str) -> str:
     return hashlib.md5(f"{title}{company}{url}".encode()).hexdigest()[:16]
 
 
+def _parse_card(card, fallback_location: str) -> dict | None:
+    title_el = card.select_one("h2.jobTitle span")
+    link_el = card.select_one("h2.jobTitle a")
+    if not title_el or not link_el:
+        return None
+
+    company_el = card.select_one("[data-testid='company-name']")
+    location_el = card.select_one("[data-testid='text-location']")
+
+    title = title_el.get_text(strip=True)
+    company = company_el.get_text(strip=True) if company_el else "Unknown"
+    location = location_el.get_text(strip=True) if location_el else fallback_location
+    href = link_el.get("href", "")
+    apply_url = f"https://www.indeed.com{href}" if href.startswith("/") else href
+    if not apply_url:
+        return None
+
+    return {
+        "source": "indeed",
+        "external_id": _make_id(title, company, apply_url),
+        "title": title,
+        "company": company,
+        "apply_url": apply_url,
+        "location": location,
+        "description": "",
+        "salary_min": None,
+        "salary_max": None,
+        "remote_type": "remote" if "remote" in location.lower() else None,
+        "company_domain": "",
+    }
+
+
 def fetch_indeed_jobs(titles: list[str], locations: list[str]) -> list[dict]:
-    """Sync function used by server.py via asyncio.to_thread. Returns parsed job dicts."""
-    results = []
+    results: list[dict] = []
+    searches = [
+        (t, l)
+        for t in titles[:MAX_TITLES]
+        for l in (locations or ["Remote"])[:MAX_LOCATIONS]
+    ]
+
     with httpx.Client(headers=HEADERS, timeout=20, follow_redirects=True) as client:
-        for title in titles[:3]:
-            for location in (locations or ["Remote"])[:2]:
-                url = "https://www.indeed.com/jobs"
-                params = {"q": title, "l": location}
-                try:
-                    r = client.get(url, params=params)
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    cards = soup.select("div.job_seen_beacon")
-                    for card in cards[:10]:
-                        title_el = card.select_one("h2.jobTitle span")
-                        company_el = card.select_one("[data-testid='company-name']")
-                        loc_el = card.select_one("[data-testid='text-location']")
-                        link_el = card.select_one("h2.jobTitle a")
-                        if not title_el or not link_el:
-                            continue
-                        job_title = title_el.get_text(strip=True)
-                        company = company_el.get_text(strip=True) if company_el else "Unknown"
-                        job_location = loc_el.get_text(strip=True) if loc_el else location
-                        href = link_el.get("href", "")
-                        apply_url = f"https://www.indeed.com{href}" if href.startswith("/") else href
-                        ext_id = _make_id(job_title, company, apply_url)
-                        results.append({
-                            "source": "indeed",
-                            "external_id": ext_id,
-                            "title": job_title,
-                            "company": company,
-                            "apply_url": apply_url,
-                            "location": job_location,
-                            "description": "",
-                            "remote_type": "remote" if "remote" in job_location.lower() else None,
-                            "salary_min": None,
-                            "salary_max": None,
-                            "company_domain": "",
-                        })
-                except Exception as e:
-                    print(f"[indeed] {title} / {location}: {e}")
-                time.sleep(2)
+        for index, (title, location) in enumerate(searches):
+            try:
+                response = client.get(
+                    "https://www.indeed.com/jobs", params={"q": title, "l": location}
+                )
+                soup = BeautifulSoup(response.text, "html.parser")
+                for card in soup.select("div.job_seen_beacon")[:MAX_CARDS]:
+                    parsed = _parse_card(card, location)
+                    if parsed:
+                        results.append(parsed)
+            except Exception as exc:
+                print(f"[indeed] {title} / {location}: {exc}")
+            if index < len(searches) - 1:
+                time.sleep(2)  # be polite between searches
+
     return results
-
-
-async def source_indeed(titles: list[str], locations: list[str]) -> list[int]:
-    import asyncio
-    job_ids = []
-    async with httpx.AsyncClient(headers=HEADERS, timeout=20, follow_redirects=True) as client:
-        for title in titles[:3]:  # limit to avoid rate limits
-            for location in (locations or ["Remote"])[:2]:
-                url = "https://www.indeed.com/jobs"
-                params = {"q": title, "l": location, "remotejob": "032b3046-06a3-4876-8dfd-474eb5e7ed11"}
-                try:
-                    r = await client.get(url, params=params)
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    cards = soup.select("div.job_seen_beacon")
-                    for card in cards[:10]:
-                        title_el = card.select_one("h2.jobTitle span")
-                        company_el = card.select_one("[data-testid='company-name']")
-                        loc_el = card.select_one("[data-testid='text-location']")
-                        link_el = card.select_one("h2.jobTitle a")
-
-                        if not title_el or not link_el:
-                            continue
-
-                        job_title = title_el.get_text(strip=True)
-                        company = company_el.get_text(strip=True) if company_el else "Unknown"
-                        job_location = loc_el.get_text(strip=True) if loc_el else location
-                        href = link_el.get("href", "")
-                        apply_url = f"https://www.indeed.com{href}" if href.startswith("/") else href
-                        ext_id = _make_id(job_title, company, apply_url)
-
-                        job_id = upsert_job(
-                            source="indeed",
-                            external_id=ext_id,
-                            title=job_title,
-                            company=company,
-                            apply_url=apply_url,
-                            location=job_location,
-                            remote_type="remote" if "remote" in job_location.lower() else None,
-                        )
-                        job_ids.append(job_id)
-                except Exception as e:
-                    print(f"[indeed] {title} / {location}: {e}")
-                await asyncio.sleep(2)
-    return job_ids

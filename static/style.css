@@ -330,6 +330,38 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   color: var(--green); padding: 12px 16px; border-radius: 8px; font-size: 14px;
 }
 
+.alert-warning, .alert-error {
+  padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 16px;
+}
+.alert-warning {
+  background: rgba(245,180,60,0.1); border: 1px solid rgba(245,180,60,0.35); color: #d9932b;
+}
+.alert-error {
+  background: rgba(230,80,80,0.1); border: 1px solid rgba(230,80,80,0.35); color: #d95555;
+}
+.alert-warning a, .alert-error a { color: inherit; text-decoration: underline; }
+
+.digest-status {
+  padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 16px;
+  background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25);
+}
+
+.view-posting {
+  flex: 1; text-align: center; font-size: 13px; padding: 8px 10px;
+  display: block; border-radius: 8px; text-decoration: none;
+}
+
+.signin-container { padding-bottom: 32px; }
+.signin-body { padding: 8px 4px; }
+.signin-body h1 { margin: 0 0 12px; font-size: 22px; }
+.signin-body p { margin: 0 0 16px; line-height: 1.5; }
+.signin-link {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  word-break: break-all;
+}
+.bubble.signin-link { user-select: all; }
+.onboard-footer { text-align: center; font-size: 13px; margin-top: 16px; opacity: 0.75; }
+
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .jobs-grid { grid-template-columns: 1fr; }

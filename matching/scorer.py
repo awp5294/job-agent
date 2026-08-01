@@ -1,59 +1,77 @@
-"""Score jobs against user criteria using Gemini."""
-import json
-import os
-import google.generativeai as genai
+"""Score jobs against a user's criteria with Claude."""
+from pydantic import BaseModel, Field
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL = "gemini-1.5-flash"
+from llm import LLMError, complete_json
+
+# Only jobs at or above this score make it into a digest.
+MATCH_THRESHOLD = 70
+
+SYSTEM = """You score job postings against a candidate's stated criteria.
+
+Be honest and specific. A high score means the candidate would plausibly want to
+apply, not merely that the posting is a real job. Weigh title fit, seniority,
+location and remote policy, and salary against what the candidate asked for.
+
+Scoring bands:
+  90-100  excellent match
+  70-89   good match
+  50-69   partial match
+  0-49    poor match
+
+The reason must be one sentence naming the concrete factor that drove the score."""
 
 
-def score_job(job: dict, criteria: dict) -> tuple[int, str]:
-    """Returns (score 0-100, one-line reason)."""
-    prompt = f"""Score this job posting against the candidate's criteria. Return JSON only.
+class JobScore(BaseModel):
+    score: int = Field(ge=0, le=100, description="How well this job matches, 0-100.")
+    reason: str = Field(description="One sentence explaining the score.")
 
-CANDIDATE CRITERIA:
-- Target titles: {criteria.get('job_titles', [])}
-- Locations: {criteria.get('locations', [])}
-- Remote preference: {criteria.get('remote_preference', 'any')}
-- Salary range: ${criteria.get('min_salary', 0)}–${criteria.get('max_salary', 0) or 'open'}
-- Seniority: {criteria.get('seniority_levels', [])}
-- Must include keywords: {criteria.get('keywords_include', [])}
-- Exclude keywords: {criteria.get('keywords_exclude', [])}
-- Exclude industries: {criteria.get('industries_exclude', [])}
 
-JOB POSTING:
-Title: {job.get('title')}
+def _criteria_block(criteria: dict) -> str:
+    salary_max = criteria.get("max_salary") or "open"
+    return f"""Target titles: {criteria.get('job_titles') or 'any'}
+Locations: {criteria.get('locations') or 'any'}
+Remote preference: {criteria.get('remote_preference') or 'any'}
+Salary range: {criteria.get('min_salary') or 0} to {salary_max}
+Seniority: {criteria.get('seniority_levels') or 'any'}
+Must include keywords: {criteria.get('keywords_include') or 'none'}
+Exclude keywords: {criteria.get('keywords_exclude') or 'none'}
+Exclude industries: {criteria.get('industries_exclude') or 'none'}"""
+
+
+def _job_block(job: dict) -> str:
+    return f"""Title: {job.get('title')}
 Company: {job.get('company')}
 Location: {job.get('location')}
 Remote: {job.get('remote_type')}
-Salary: {job.get('salary_min')}–{job.get('salary_max')}
-Description snippet: {(job.get('description') or '')[:800]}
+Salary: {job.get('salary_min')} to {job.get('salary_max')}
+Description: {(job.get('description') or '')[:800]}"""
 
-Respond with exactly: {{"score": <0-100>, "reason": "<one sentence why this does or doesn't match>"}}
-Score 90-100 = excellent match, 70-89 = good match, 50-69 = partial, <50 = poor match.
-Only score ≥70 should be included in a digest. Be honest and specific."""
 
+def score_job(job: dict, criteria: dict) -> tuple[int, str]:
+    """Return (score, reason) for one job. Never raises — scoring is best-effort."""
+    prompt = (
+        f"CANDIDATE CRITERIA:\n{_criteria_block(criteria)}\n\n"
+        f"JOB POSTING:\n{_job_block(job)}"
+    )
     try:
-        model = genai.GenerativeModel(MODEL)
-        msg = model.generate_content(prompt)
-        text = msg.text.strip()
-        # extract JSON even if wrapped in markdown
-        if "```" in text:
-            text = text.split("```")[1].replace("json", "").strip()
-        data = json.loads(text)
-        return int(data["score"]), data["reason"]
-    except Exception as e:
-        print(f"[scorer] error: {e}")
-        return 50, "Could not score automatically."
+        # Low effort: this is a bounded classification, not open-ended reasoning.
+        result = complete_json(
+            system=SYSTEM, prompt=prompt, schema=JobScore, max_tokens=2000, effort="low"
+        )
+    except LLMError as exc:
+        print(f"[scorer] {job.get('title')!r}: {exc}")
+        return 0, f"Could not score automatically ({exc})."
+    return result.score, result.reason
 
 
-def score_jobs_for_user(all_jobs: list[dict], user_id: int, criteria: dict) -> list[tuple[dict, int, str]]:
-    """Returns list of (job_dict, score, reason) for jobs scoring ≥70."""
+def score_jobs_for_user(all_jobs: list[dict], user_id: int,
+                        criteria: dict) -> list[tuple[dict, int, str]]:
+    """Score every stored job and keep the ones at or above the match threshold."""
     results = []
     for job in all_jobs:
         if not job.get("id"):
             continue
         score, reason = score_job(job, criteria)
-        if score >= 70:
+        if score >= MATCH_THRESHOLD:
             results.append((job, score, reason))
     return results

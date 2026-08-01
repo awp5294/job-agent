@@ -73,17 +73,55 @@
       <p>Send this link to anyone who wants their own job agent account:</p>
       <div class="invite-row">
         <input type="text" class="invite-input" value="{{ invite_url }}" readonly id="invite-url">
-        <button class="btn-secondary" onclick="copyInvite()">Copy</button>
+        <button class="btn-secondary" onclick="copyField('invite-url', this)">Copy</button>
       </div>
-      <p class="section-note">They'll go through onboarding with their own criteria, resume, and Gmail.</p>
+      <p class="section-note">
+        They go through onboarding with their own criteria, resume, and Gmail, and
+        get their own dashboard. They can't see your jobs and you can't see theirs.
+        {% if require_invite %}
+        Sign-up requires one of these links, so the URL is safe to leave public.
+        {% else %}
+        <strong>Note:</strong> <code>REQUIRE_INVITE=0</code> is set, so anyone who
+        finds the URL can sign up without a link.
+        {% endif %}
+      </p>
+    </section>
+
+    <section class="settings-section">
+      <h2>Your sign-in</h2>
+      {% if gmail_connected %}
+      <p>Gmail is connected as <strong>{{ user.email }}</strong>. Sign back in any time with Google.</p>
+      {% elif google_available %}
+      <p class="alert-warning">
+        Gmail isn't connected, so no digest emails can be sent yet.
+        <a href="/auth/gmail">Connect Gmail</a>.
+      </p>
+      {% else %}
+      <p>Gmail OAuth isn't configured on this deployment.</p>
+      {% endif %}
+
+      <p class="section-note">
+        Private sign-in link — keep it secret, anyone with it can open your account:
+      </p>
+      <div class="invite-row">
+        <input type="password" class="invite-input" value="{{ signin_url }}" readonly id="signin-url">
+        <button class="btn-secondary" onclick="revealField('signin-url', this)">Show</button>
+        <button class="btn-secondary" onclick="copyField('signin-url', this)">Copy</button>
+      </div>
     </section>
   </div>
 
   <script>
-    function copyInvite() {
-      navigator.clipboard.writeText(document.getElementById('invite-url').value);
-      event.target.textContent = 'Copied!';
-      setTimeout(() => event.target.textContent = 'Copy', 2000);
+    function copyField(id, btn) {
+      navigator.clipboard.writeText(document.getElementById(id).value);
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    }
+    function revealField(id, btn) {
+      const el = document.getElementById(id);
+      const hidden = el.type === 'password';
+      el.type = hidden ? 'text' : 'password';
+      btn.textContent = hidden ? 'Hide' : 'Show';
     }
   </script>
 </body>

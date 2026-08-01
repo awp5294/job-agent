@@ -1,10 +1,7 @@
-"""Generate tailored cover letters via Gemini with stop-slop filtering."""
-import os
+"""Generate tailored cover letters with Claude, then strip AI writing tells."""
 import re
-import google.generativeai as genai
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL = "gemini-1.5-flash"
+from llm import complete_text
 
 SLOP_REPLACEMENTS = {
     r"\bdelve\b": "explore",
@@ -25,7 +22,7 @@ SLOP_PHRASES = [
     r"I am (deeply |truly |genuinely )?passionate about",
     r"I am (deeply |truly |genuinely )?excited (to|about)",
     r"I would be (thrilled|honored|delighted) to",
-    r"it's worth noting",
+    r"it'?s worth noting",
     r"it is worth noting",
     r"I believe that I",
     r"Throughout my career",
@@ -41,20 +38,12 @@ SLOP_PHRASES = [
 
 
 def stop_slop(text: str) -> str:
-    """Remove AI writing tells from generated text."""
+    """Remove AI writing tells. Word swaps first, then whole offending sentences."""
     for pattern, replacement in SLOP_REPLACEMENTS.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     for phrase in SLOP_PHRASES:
-        # Replace slop phrase sentences with nothing, then clean up whitespace
-        text = re.sub(
-            rf"[^.!?]*{phrase}[^.!?]*[.!?]\s*",
-            "",
-            text,
-            flags=re.IGNORECASE,
-        )
-    # Clean up extra blank lines
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text
+        text = re.sub(rf"[^.!?]*{phrase}[^.!?]*[.!?]\s*", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def generate_cover_letter(
@@ -65,26 +54,26 @@ def generate_cover_letter(
     criteria: dict | None = None,
 ) -> str:
     system = f"""You are writing a cover letter for a job applicant.
+
 Their resume:
-{resume_text[:2000]}
+{(resume_text or '(no resume provided)')[:2000]}
 
 Rules:
 - Exactly 3 short paragraphs, under 250 words total
-- No salutation (no "Dear Hiring Manager")
-- Start immediately with a strong, specific first sentence about the role
-- No clichés, no filler phrases, no sycophantic openers
+- No salutation (no "Dear Hiring Manager") and no sign-off
+- Start immediately with a specific first sentence about the role
+- No cliches, no filler, no sycophantic openers
 - Be direct and confident
-- Use concrete examples from the resume where possible
-- Do not use: delve, tapestry, leverage (metaphorically), synergy, passionate, excited, thrilled, spearhead, dynamic, robust, seamless
-- Sound like a smart human wrote this in 20 minutes, not an AI"""
+- Use concrete details from the resume wherever you can
+- Never use: delve, tapestry, leverage (metaphorically), synergy, passionate,
+  excited, thrilled, spearhead, dynamic, robust, seamless
+- Sound like a smart human wrote it in 20 minutes, not like an AI
+- Output only the letter itself, with no preamble or commentary"""
 
     prompt = f"""Write a cover letter for this position:
 
 Job Title: {job_title}
 Company: {company}
-Description: {job_description[:1500]}"""
+Description: {(job_description or '')[:1500]}"""
 
-    model = genai.GenerativeModel(MODEL, system_instruction=system)
-    msg = model.generate_content(prompt)
-    raw = msg.text.strip()
-    return stop_slop(raw)
+    return stop_slop(complete_text(system=system, prompt=prompt, max_tokens=4000))

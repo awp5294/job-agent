@@ -1,6 +1,24 @@
-"""Playwright-based form pre-filler for job applications."""
+"""Playwright-based form pre-filler for job applications.
+
+OPTIONAL. The web app doesn't use this — the dashboard opens the application in
+a new browser tab instead, which is what you want on a hosted deployment where
+there is no desktop to open a browser on. This module is here for running the
+agent locally against a real browser.
+
+    pip install playwright && playwright install chromium
+"""
 import asyncio
-from playwright.async_api import async_playwright
+
+
+def _playwright():
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "Playwright is not installed. Run: pip install playwright && "
+            "playwright install chromium"
+        ) from exc
+    return async_playwright
 
 
 async def prefill_application(
@@ -13,7 +31,7 @@ async def prefill_application(
     Opens the job application URL in a browser, pre-fills common fields,
     and pastes the cover letter. Pauses for user review before submit.
     """
-    async with async_playwright() as p:
+    async with _playwright()() as p:
         browser = await p.chromium.launch(headless=headless)
         context = await browser.new_context()
         page = await context.new_page()
@@ -79,7 +97,7 @@ async def prefill_application(
 
 async def open_job_for_review(apply_url: str):
     """Just open the job URL in a visible browser."""
-    async with async_playwright() as p:
+    async with _playwright()() as p:
         browser = await p.chromium.launch(headless=False)
         page = await browser.new_page()
         await page.goto(apply_url)
