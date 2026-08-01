@@ -57,7 +57,7 @@ def fetch_lever_jobs(company_slug: str) -> list[dict]:
         with httpx.Client(timeout=15) as client:
             r = client.get(url)
             r.raise_for_status()
-            return [parse_job(j, company_slug) for j ir r.json()]
+            return [parse_job(j, company_slug) for j in r.json()]
     except Exception as e:
         print(f"[lever] {company_slug}: {e}")
         return []
