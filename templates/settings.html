@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Agent — Settings</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="settings-page">
+  <nav class="nav">
+    <div class="nav-brand">⚡ Job Agent</div>
+    <div class="nav-user">
+      <a href="/dashboard" class="nav-link">← Dashboard</a>
+      <a href="/logout" class="nav-link">Logout</a>
+    </div>
+  </nav>
+
+  <div class="settings-container">
+    <h1>Settings</h1>
+
+    {% if request.query_params.get('saved') %}
+    <div class="alert-success">Settings saved.</div>
+    {% endif %}
+
+    <form method="POST" action="/settings" class="settings-form">
+      <section class="settings-section">
+        <h2>Job Criteria</h2>
+
+        <label>Job titles <span class="hint">comma-separated</span></label>
+        <input type="text" name="job_titles" value="{{ ', '.join(criteria.get('job_titles', [])) }}" placeholder="Product Manager, Senior PM">
+
+        <label>Locations <span class="hint">comma-separated; leave blank for remote-only</span></label>
+        <input type="text" name="locations" value="{{ ', '.join(criteria.get('locations', [])) }}" placeholder="New York, San Francisco">
+
+        <label>Remote preference</label>
+        <select name="remote_preference">
+          {% for opt in ['any', 'remote', 'hybrid', 'onsite'] %}
+          <option value="{{ opt }}" {% if criteria.get('remote_preference') == opt %}selected{% endif %}>{{ opt.title() }}</option>
+          {% endfor %}
+        </select>
+
+        <div class="two-col">
+          <div>
+            <label>Min salary ($)</label>
+            <input type="number" name="min_salary" value="{{ criteria.get('min_salary') or '' }}" placeholder="120000">
+          </div>
+          <div>
+            <label>Max salary ($)</label>
+            <input type="number" name="max_salary" value="{{ criteria.get('max_salary') or '' }}" placeholder="180000">
+          </div>
+        </div>
+
+        <label>Seniority levels <span class="hint">comma-separated</span></label>
+        <input type="text" name="seniority_levels" value="{{ ', '.join(criteria.get('seniority_levels', [])) }}" placeholder="Senior, Staff, Lead">
+      </section>
+
+      <section class="settings-section">
+        <h2>Job Sources</h2>
+        <p class="section-note">Add company slugs to watch on Greenhouse and Lever. These are the company identifiers in their job board URLs.</p>
+
+        <label>Greenhouse companies <span class="hint">e.g. stripe, airbnb, notion</span></label>
+        <input type="text" name="greenhouse_companies" value="{{ ', '.join(criteria.get('greenhouse_companies', [])) }}" placeholder="stripe, airbnb, linear">
+
+        <label>Lever companies <span class="hint">e.g. vercel, figma</span></label>
+        <input type="text" name="lever_companies" value="{{ ', '.join(criteria.get('lever_companies', [])) }}" placeholder="vercel, figma">
+      </section>
+
+      <button type="submit" class="btn-primary btn-full">Save Settings</button>
+    </form>
+
+    <section class="settings-section invite-section">
+      <h2>Share with a friend</h2>
+      <p>Send this link to anyone who wants their own job agent account:</p>
+      <div class="invite-row">
+        <input type="text" class="invite-input" value="{{ invite_url }}" readonly id="invite-url">
+        <button class="btn-secondary" onclick="copyInvite()">Copy</button>
+      </div>
+      <p class="section-note">They'll go through onboarding with their own criteria, resume, and Gmail.</p>
+    </section>
+  </div>
+
+  <script>
+    function copyInvite() {
+      navigator.clipboard.writeText(document.getElementById('invite-url').value);
+      event.target.textContent = 'Copied!';
+      setTimeout(() => event.target.textContent = 'Copy', 2000);
+    }
+  </script>
+</body>
+</html>
