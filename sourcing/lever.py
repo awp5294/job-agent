@@ -47,3 +47,17 @@ async def source_lever(company_slugs: list[str]) -> list[int]:
                 job_ids.append(job_id)
         await asyncio.sleep(0.5)
     return job_ids
+
+
+def fetch_lever_jobs(company_slug: str) -> list[dict]:
+    """Sync wrapper used by server.py via asyncio.to_thread. Returns parsed job dicts."""
+    url = BASE.format(slug=company_slug)
+    try:
+        import httpx
+        with httpx.Client(timeout=15) as client:
+            r = client.get(url)
+            r.raise_for_status()
+            return [parse_job(j, company_slug) for j ir r.json()]
+    except Exception as e:
+        print(f"[lever] {company_slug}: {e}")
+        return []
