@@ -81,9 +81,53 @@ signer = URLSafeSerializer(SECRET_KEY)
 scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
 
+def startup_report() -> list[str]:
+    """Things that would make the app quietly do nothing. Printed at boot."""
+    problems = []
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        problems.append(
+            "ANTHROPIC_API_KEY is not set — jobs can't be scored and no cover "
+            "letters can be written. Nothing will reach anyone's inbox."
+        )
+    if SECRET_KEY == "change-me-in-production":
+        problems.append(
+            "SECRET_KEY is still the default — anyone could forge a login. "
+            "Set it to a random string."
+        )
+    if not oauth_configured():
+        if smtp_configured():
+            problems.append(
+                "Gmail isn't configured, so digests go out over SMTP and replies "
+                "can't be read. The reply-to-apply flow needs Gmail."
+            )
+        else:
+            problems.append(
+                "No email configured (neither Gmail nor SMTP) — matches will only "
+                "appear on the dashboard, and no digests will be sent."
+            )
+    if BASE_URL.startswith("http://localhost") or BASE_URL.startswith("http://127."):
+        problems.append(
+            f"BASE_URL is {BASE_URL} — fine locally, but invite links and Google "
+            "sign-in will be broken if this is a real deployment."
+        )
+    return problems
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db(DB_PATH)
+
+    problems = startup_report()
+    if problems:
+        print("\n  Job Agent started, but some things won't work:")
+        for problem in problems:
+            print(f"   - {problem}")
+        print()
+    else:
+        print("\n  Job Agent ready. Digests at "
+              f"{DIGEST_HOUR:02d}:00 {TIMEZONE}, replies checked every "
+              f"{REPLY_POLL_MINUTES} min.\n")
+
     if ENABLE_SCHEDULER:
         scheduler.add_job(run_all_digests, "cron", hour=DIGEST_HOUR, minute=0)
         # Without this, replying to the digest does nothing until someone opens
