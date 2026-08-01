@@ -1,65 +1,32 @@
-"""Greenhouse public API sourcer — no auth required."""
+"""Greenhouse public job-board API. No auth required.
+
+Sourcers only fetch and normalise — the server decides what to store.
+"""
 import httpx
-import asyncio
-from db.database import upsert_job
 
 BASE = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 
 
-async def fetch_greenhouse(company_slug: str) -> list[dict]:
-    url = BASE.format(slug=company_slug)
-    async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            r = await client.get(url, params={"content": "true"})
-            r.raise_for_status()
-            data = r.json()
-            return data.get("jobs", [])
-        except Exception as e:
-            print(f"[greenhouse] {company_slug}: {e}")
-            return []
-
-
 def parse_job(job: dict, company_slug: str) -> dict:
-    loc = job.get("location", {}).get("name", "")
-    salary_min = salary_max = None
-    # Greenhouse sometimes embeds salary in the title or metadata
+    location = (job.get("location") or {}).get("name", "")
     return {
         "source": "greenhouse",
-        "external_id": str(job["id"]),
+        "external_id": str(job.get("id", "")),
         "title": job.get("title", ""),
         "company": company_slug.replace("-", " ").title(),
         "apply_url": job.get("absolute_url", ""),
-        "location": loc,
-        "description": job.get("content", "")[:3000],
-        "salary_min": salary_min,
-        "salary_max": salary_max,
-        "remote_type": "remote" if "remote" in loc.lower() else None,
+        "location": location,
+        "description": (job.get("content") or "")[:3000],
+        "salary_min": None,
+        "salary_max": None,
+        "remote_type": "remote" if "remote" in location.lower() else None,
     }
 
 
-async def source_greenhouse(company_slugs: list[str]) -> list[int]:
-    """Returns list of job IDs stored in DB."""
-    job_ids = []
-    for slug in company_slugs:
-        jobs = await fetch_greenhouse(slug)
-        for job in jobs:
-            parsed = parse_job(job, slug)
-            job_id = upsert_job(**parsed)
-            job_ids.append(job_id)
-        await asyncio.sleep(0.5)
-    return job_ids
-
-
 def fetch_greenhouse_jobs(company_slug: str) -> list[dict]:
-    """Sync wrapper used by server.py via asyncio.to_thread. Returns parsed job dicts."""
-    url = BASE.format(slug=company_slug)
-    try:
-        import httpx
-        with httpx.Client(timeout=15) as client:
-            r = client.get(url, params={"content": "true"})
-            r.raise_for_status()
-            data = r.json()
-            return [parse_job(j, company_slug) for j in data.get("jobs", [])]
-    except Exception as e:
-        print(f"[greenhouse] {company_slug}: {e}")
-        return []
+    """Return normalised job dicts for one company board."""
+    with httpx.Client(timeout=15) as client:
+        response = client.get(BASE.format(slug=company_slug), params={"content": "true"})
+        response.raise_for_status()
+        jobs = response.json().get("jobs", [])
+    return [parse_job(j, company_slug) for j in jobs if j.get("absolute_url")]

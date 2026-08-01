@@ -13,9 +13,15 @@
       <div class="progress-bar">
         <div class="progress-fill" id="progress-fill" style="width:0%"></div>
       </div>
-      <div class="progress-label" id="progress-label">Step 1 of 8</div>
+      <div class="progress-label" id="progress-label">Step 1 of {{ total_steps }}</div>
     </div>
 
+    {% if signup_blocked %}
+    <div class="chat-window">
+      <div class="bubble bubble-bot">{{ signup_blocked }}</div>
+      <div class="bubble bubble-bot">Already have an account? <a href="/signin">Sign in</a>.</div>
+    </div>
+    {% else %}
     <div class="chat-window" id="chat-window">
       <!-- Messages injected by JS -->
     </div>
@@ -30,9 +36,9 @@
         <span class="upload-or">or paste below</span>
       </div>
 
-      <!-- Gmail button (hidden until needed) -->
-      <div id="gmail-btn-area" style="display:none" class="gmail-area">
-        <a href="/auth/gmail" class="gmail-btn">
+      <!-- Final step (hidden until needed) -->
+      <div id="finish-area" style="display:none" class="gmail-area">
+        <a href="/auth/gmail" class="gmail-btn" id="gmail-btn" style="display:none">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:8px">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -41,27 +47,31 @@
           </svg>
           Connect Gmail
         </a>
-        <p class="gmail-note">This lets the agent send your digest and read your replies</p>
+        <button class="gmail-btn" id="finish-btn" style="display:none" onclick="finishWithoutGmail()">
+          Create my account
+        </button>
+        <p class="gmail-note" id="finish-note">This lets the agent send your digest and read your replies</p>
       </div>
 
       <div class="input-row">
-        <textarea
-          id="chat-input"
-          class="chat-textarea"
-          placeholder="Type your message..."
-          rows="1"
-        ></textarea>
+        <textarea id="chat-input" class="chat-textarea" placeholder="Type your message..." rows="1"></textarea>
         <button id="send-btn" class="send-btn" onclick="sendMessage()">Send</button>
       </div>
     </div>
+    {% endif %}
+
+    <p class="onboard-footer">Already have an account? <a href="/signin">Sign in</a></p>
   </div>
 
-  <script src="/static/chat.js"></script>
+  {% if not signup_blocked %}
   <script>
-    // Start the conversation
-    window.addEventListener('DOMContentLoaded', () => {
-      appendBot("Hi! I'm your job agent. What's your name?");
-    });
+    window.JOB_AGENT = {
+      totalSteps: {{ total_steps }},
+      googleAvailable: {{ 'true' if google_available else 'false' }},
+      firstPrompt: {{ first_prompt | tojson }}
+    };
   </script>
+  <script src="/static/chat.js"></script>
+  {% endif %}
 </body>
 </html>

@@ -1,27 +1,12 @@
-"""Lever public API sourcer — no auth required."""
+"""Lever public postings API. No auth required."""
 import httpx
-import asyncio
-from db.database import upsert_job
 
 BASE = "https://api.lever.co/v0/postings/{slug}?mode=json"
 
 
-async def fetch_lever(company_slug: str) -> list[dict]:
-    url = BASE.format(slug=company_slug)
-    async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            r = await client.get(url)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            print(f"[lever] {company_slug}: {e}")
-            return []
-
-
 def parse_job(job: dict, company_slug: str) -> dict:
-    categories = job.get("categories", {})
-    location = categories.get("location", "")
-    commitment = categories.get("commitment", "")
+    categories = job.get("categories") or {}
+    location = categories.get("location") or ""
     return {
         "source": "lever",
         "external_id": job.get("id", ""),
@@ -29,35 +14,16 @@ def parse_job(job: dict, company_slug: str) -> dict:
         "company": company_slug.replace("-", " ").title(),
         "apply_url": job.get("hostedUrl", ""),
         "location": location,
-        "description": job.get("descriptionPlain", "")[:3000],
-        "remote_type": "remote" if "remote" in location.lower() else None,
+        "description": (job.get("descriptionPlain") or "")[:3000],
         "salary_min": None,
         "salary_max": None,
+        "remote_type": "remote" if "remote" in location.lower() else None,
     }
 
 
-async def source_lever(company_slugs: list[str]) -> list[int]:
-    job_ids = []
-    for slug in company_slugs:
-        jobs = await fetch_lever(slug)
-        for job in jobs:
-            parsed = parse_job(job, slug)
-            if parsed["apply_url"]:
-                job_id = upsert_job(**parsed)
-                job_ids.append(job_id)
-        await asyncio.sleep(0.5)
-    return job_ids
-
-
 def fetch_lever_jobs(company_slug: str) -> list[dict]:
-    """Sync wrapper used by server.py via asyncio.to_thread. Returns parsed job dicts."""
-    url = BASE.format(slug=company_slug)
-    try:
-        import httpx
-        with httpx.Client(timeout=15) as client:
-            r = client.get(url)
-            r.raise_for_status()
-            return [parse_job(j, company_slug) for j in r.json()]
-    except Exception as e:
-        print(f"[lever] {company_slug}: {e}")
-        return []
+    with httpx.Client(timeout=15) as client:
+        response = client.get(BASE.format(slug=company_slug))
+        response.raise_for_status()
+        postings = response.json()
+    return [parse_job(j, company_slug) for j in postings if j.get("hostedUrl")]

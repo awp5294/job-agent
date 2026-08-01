@@ -19,8 +19,17 @@
   <div class="dashboard-container">
     <div class="dashboard-header">
       <h1>Your Jobs</h1>
-      <button class="btn-primary" onclick="runDigest()">🔄 Run digest</button>
+      <button class="btn-primary" id="run-digest-btn" onclick="runDigest()">🔄 Run digest</button>
     </div>
+
+    {% if not gmail_connected %}
+    <div class="alert-warning">
+      Gmail isn't connected, so daily digest emails can't be sent. Matches will
+      still show up here. <a href="/auth/gmail">Connect Gmail</a>.
+    </div>
+    {% endif %}
+
+    <div id="digest-status" class="digest-status" style="display:none"></div>
 
     <div class="tabs">
       <button class="tab active" onclick="switchTab('new', this)">New Matches <span id="count-new" class="badge"></span></button>
