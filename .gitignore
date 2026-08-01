@@ -1,0 +1,9 @@
+.env
+*.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+gmail_token_*.json
+node_modules/
+.DS_Store
