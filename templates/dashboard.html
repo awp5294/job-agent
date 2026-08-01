@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Agent — Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dashboard-page">
+  <nav class="nav">
+    <div class="nav-brand">⚡ Job Agent</div>
+    <div class="nav-user">
+      <span>{{ user.name }}</span>
+      <a href="/settings" class="nav-link">Settings</a>
+      <a href="/logout" class="nav-link">Logout</a>
+    </div>
+  </nav>
+
+  <div class="dashboard-container">
+    <div class="dashboard-header">
+      <h1>Your Jobs</h1>
+      <button class="btn-primary" onclick="runDigest()">🔄 Run digest</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('new', this)">New Matches <span id="count-new" class="badge"></span></button>
+      <button class="tab" onclick="switchTab('selected', this)">Selected <span id="count-selected" class="badge"></span></button>
+      <button class="tab" onclick="switchTab('applied', this)">Applied <span id="count-applied" class="badge"></span></button>
+    </div>
+
+    <div id="jobs-new" class="jobs-grid"></div>
+    <div id="jobs-selected" class="jobs-grid" style="display:none"></div>
+    <div id="jobs-applied" class="jobs-grid" style="display:none"></div>
+
+    <div id="empty-state" class="empty-state" style="display:none">
+      <p>No jobs here yet.</p>
+      <p>Click <strong>Run digest</strong> to pull today's matches, or add company slugs in <a href="/settings">Settings</a>.</p>
+    </div>
+  </div>
+
+  <!-- Cover Letter Modal -->
+  <div id="cl-modal" class="modal" style="display:none">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="modal-title">Cover Letter</h2>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <p class="modal-subtitle" id="modal-subtitle"></p>
+      <textarea id="cl-textarea" class="cl-textarea" rows="14"></textarea>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="openApplication()">Open Application →</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" style="display:none"></div>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
