@@ -58,13 +58,13 @@ def stop_slop(text: str) -> str:
 
 
 def generate_cover_letter(
-    user_name: str,
-    resume_text: str,
     job_title: str,
     company: str,
     job_description: str,
+    resume_text: str = "",
+    criteria: dict | None = None,
 ) -> str:
-    system = f"""You are writing a cover letter for {user_name}.
+    system = f"""You are writing a cover letter for a job applicant.
 Their resume:
 {resume_text[:2000]}
 
