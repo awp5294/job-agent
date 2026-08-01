@@ -1,10 +1,10 @@
-"""Generate tailored cover letters via Claude with stop-slop filtering."""
+"""Generate tailored cover letters via Gemini with stop-slop filtering."""
 import os
 import re
-import anthropic
+import google.generativeai as genai
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-MODEL = "claude-sonnet-4-6"
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+MODEL = "gemini-1.5-flash"
 
 SLOP_REPLACEMENTS = {
     r"\bdelve\b": "explore",
@@ -47,7 +47,7 @@ def stop_slop(text: str) -> str:
     for phrase in SLOP_PHRASES:
         # Replace slop phrase sentences with nothing, then clean up whitespace
         text = re.sub(
-            rf"[^.!?]*{phrase}[^.!?]*^[.!?]\s*",
+            rf"[^.!?]*{phrase}[^.!?]*[.!?]\s*",
             "",
             text,
             flags=re.IGNORECASE,
@@ -84,11 +84,7 @@ Job Title: {job_title}
 Company: {company}
 Description: {job_description[:1500]}"""
 
-    msg = client.messages.create(
-        model=MODEL,
-        max_tokens=600,
-        system=system,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw = msg.content[0].text.strip()
+    model = genai.GenerativeModel(MODEL, system_instruction=system)
+    msg = model.generate_content(prompt)
+    raw = msg.text.strip()
     return stop_slop(raw)
