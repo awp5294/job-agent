@@ -47,6 +47,7 @@ from email_handler.gmail import (
     poll_for_replies, send_application_email, send_digest_email, smtp_configured,
 )
 from llm import LLMError
+from llm import describe as llm_describe
 from matching.scorer import score_jobs_for_user
 from sourcing.greenhouse import fetch_greenhouse_jobs
 from sourcing.indeed import fetch_indeed_jobs
@@ -84,9 +85,13 @@ scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 def startup_report() -> list[str]:
     """Things that would make the app quietly do nothing. Printed at boot."""
     problems = []
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    try:
+        llm_provider = llm_describe()
+    except Exception as exc:  # pragma: no cover - defensive
+        llm_provider = f"not configured — {exc}"
+    if "not configured" in llm_provider:
         problems.append(
-            "ANTHROPIC_API_KEY is not set — jobs can't be scored and no cover "
+            f"No AI key set ({llm_provider}) — jobs can't be scored and no cover "
             "letters can be written. Nothing will reach anyone's inbox."
         )
     if SECRET_KEY == "change-me-in-production":
@@ -124,7 +129,7 @@ async def lifespan(app: FastAPI):
             print(f"   - {problem}")
         print()
     else:
-        print("\n  Job Agent ready. Digests at "
+        print(f"\n  Job Agent ready. AI: {llm_describe()}. Digests at "
               f"{DIGEST_HOUR:02d}:00 {TIMEZONE}, replies checked every "
               f"{REPLY_POLL_MINUTES} min.\n")
 

@@ -10,9 +10,9 @@ share it with friends and each of them runs their own search.
 ## Features
 
 - Chat-based onboarding — set your criteria in the browser
-- Daily email digest with Claude-scored matches (only ≥70% shown)
+- Daily email digest with AI-scored matches (only ≥70% shown)
 - Reply to the email with job numbers → those jobs move to Selected
-- Claude writes a tailored cover letter per job, with a stop-slop filter over the output
+- A tailored cover letter per job, with a stop-slop filter over the output
 - Dashboard: New Matches / Selected / Applied
 - Multi-user: share an invite link; each person gets their own account, criteria and jobs
 - Sources: Greenhouse API, Lever API, Indeed
@@ -25,7 +25,7 @@ cd job-agent
 python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env — add your ANTHROPIC_API_KEY and a SECRET_KEY at minimum
+# Edit .env — add GEMINI_API_KEY (or ANTHROPIC_API_KEY) and a SECRET_KEY
 uvicorn server:app --reload
 ```
 
@@ -39,18 +39,32 @@ you sign in with the private link shown at the end of onboarding.
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
+| `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` | Yes | One AI key. Either provider works — see below. |
 | `SECRET_KEY` | Yes | Random string for session signing — `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `BASE_URL` | Yes | Your public URL, e.g. `https://yourapp.railway.app`. Must match the Gmail redirect URI. |
 | `GMAIL_CLIENT_ID` | For email | From Google Cloud Console |
 | `GMAIL_CLIENT_SECRET` | For email | From Google Cloud Console |
 | `SMTP_USER` / `SMTP_PASS` | Fallback | Gmail address + app password, if you'd rather not set up OAuth |
 | `REQUIRE_INVITE` | No | Defaults to `1`. Set to `0` to let anyone with the URL sign up. |
-| `ANTHROPIC_MODEL` | No | Defaults to `claude-opus-5` |
+| `LLM_PROVIDER` | No | `anthropic` or `gemini`. Only needed if both keys are set. |
+| `ANTHROPIC_MODEL` / `GEMINI_MODEL` | No | Defaults: `claude-opus-5` / `gemini-2.5-flash` |
 | `DIGEST_HOUR` / `TIMEZONE` | No | When the daily digest runs. Defaults to 8am UTC. |
 | `DIGEST_LIMIT` | No | Jobs per digest email. Defaults to 10. |
 | `REPLY_POLL_MINUTES` | No | How often to check for replies. Defaults to 15. |
 | `DB_PATH` | No | SQLite file location. Defaults to `jobagent.db`. |
+
+## Which AI Provider
+
+The app runs on **Claude or Gemini** — it uses whichever API key it finds:
+
+- `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) → Gemini, default model `gemini-2.5-flash`
+- `ANTHROPIC_API_KEY` → Claude, default model `claude-opus-5`
+
+If both are set, Claude is used; set `LLM_PROVIDER=gemini` to override. The startup log
+prints which provider and model are active, so you can confirm at a glance.
+
+If your key doesn't have access to the default model, the error message says so and tells
+you to set `GEMINI_MODEL` / `ANTHROPIC_MODEL`.
 
 ## How Sign-In Works
 
@@ -120,14 +134,14 @@ than failing. Greenhouse and Lever are the reliable sources.
 ## How It Works
 
 1. **Daily at `DIGEST_HOUR`** — fetch jobs from every configured source, score each
-   against your criteria with Claude, and keep the ones scoring ≥70%
+   against your criteria, and keep the ones scoring ≥70%
 2. **Email digest** — the top `DIGEST_LIMIT` (default 10) matches, numbered, to your
    inbox. Anything below the cut stays queued for the next digest.
 3. **You reply** — `1, 3, 5`. Quoted text is ignored, so the digest's own numbers aren't
    read back as selections.
 4. **The agent picks it up within `REPLY_POLL_MINUTES`** (default 15), writes a tailored
-   cover letter for each job you picked, and emails them back to you with a direct
-   apply link per job.
+   cover letter for each job you picked, and emails them back with a direct apply link
+   per job.
 5. **You tap the link and submit.** Everything is also on the dashboard if you'd rather
    edit a letter first.
 
@@ -150,14 +164,14 @@ pytest
 ```
 
 The suite covers onboarding, sign-in and the invite gate, cross-account isolation, the
-digest pipeline, reply parsing, and job-board parsing. The Anthropic API and the job
-boards are stubbed, so no network access or API key is needed.
+digest pipeline, reply parsing, job-board parsing, and both AI providers. Every network
+call is stubbed, so no internet access or API key is needed.
 
 ## Project Layout
 
 ```
 server.py              FastAPI routes, sessions, onboarding, digest orchestration
-llm.py                 Anthropic client, model config, error handling
+llm.py                 Claude/Gemini client, model config, error handling
 db/database.py         SQLite data layer (all queries live here)
 db/schema.sql          Schema + additive migrations
 matching/scorer.py     Scores a job against a user's criteria

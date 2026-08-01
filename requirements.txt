@@ -3,7 +3,9 @@ uvicorn[standard]==0.34.0
 jinja2==3.1.5
 python-multipart==0.0.20
 itsdangerous==2.2.0
+# Either provider works — the app uses whichever API key you set.
 anthropic==0.120.2
+google-genai==2.16.0
 httpx==0.28.1
 beautifulsoup4==4.12.3
 google-auth==2.37.0

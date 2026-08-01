@@ -34,6 +34,7 @@ class FakeMessages:
 
 @pytest.fixture
 def fake_llm(monkeypatch):
+    """Stub the Claude client. Anthropic is the provider in the test env."""
     def install(**kwargs):
         messages = FakeMessages(**kwargs)
         monkeypatch.setattr(llm, "get_client", lambda: SimpleNamespace(messages=messages))
@@ -41,13 +42,78 @@ def fake_llm(monkeypatch):
     return install
 
 
-# ── llm wrapper ────────────────────────────────────────────────────────────
+# ── Provider selection ─────────────────────────────────────────────────────
 
-def test_missing_api_key_is_a_clear_error(monkeypatch):
+def test_no_key_at_all_is_a_clear_error(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     llm.reset_client()
-    with pytest.raises(LLMError, match="ANTHROPIC_API_KEY is not set"):
-        llm.get_client()
+    with pytest.raises(LLMError, match="No AI key configured"):
+        llm.get_provider()
+    llm.reset_client()
+
+
+def test_a_gemini_key_alone_selects_gemini(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    llm.reset_client()
+    assert llm.get_provider() == "gemini"
+    assert llm.get_model() == llm.DEFAULT_GEMINI_MODEL
+    llm.reset_client()
+
+
+def test_google_api_key_also_works(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
+    llm.reset_client()
+    assert llm.get_provider() == "gemini"
+    llm.reset_client()
+
+
+def test_anthropic_wins_when_both_keys_are_set(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    llm.reset_client()
+    assert llm.get_provider() == "anthropic"
+    llm.reset_client()
+
+
+def test_llm_provider_env_var_overrides_detection(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    llm.reset_client()
+    assert llm.get_provider() == "gemini"
+
+    monkeypatch.setenv("LLM_PROVIDER", "nonsense")
+    with pytest.raises(LLMError, match="not recognised"):
+        llm.get_provider()
+    llm.reset_client()
+
+
+def test_models_are_overridable(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    llm.reset_client()
+    assert llm.get_model() == "claude-sonnet-5"
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-pro")
+    assert llm.get_model() == "gemini-2.5-pro"
+    llm.reset_client()
+
+
+def test_describe_names_the_active_provider(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    llm.reset_client()
+    assert "gemini" in llm.describe()
+
+    monkeypatch.delenv("GEMINI_API_KEY")
+    assert "not configured" in llm.describe()
     llm.reset_client()
 
 
@@ -80,7 +146,7 @@ def test_score_job_returns_the_models_verdict(fake_llm):
 
     assert (score, reason) == (93, "Title and remote policy match.")
     call = messages.calls[0]
-    assert call["model"] == llm.MODEL
+    assert call["model"] == llm.get_model()
     assert call["output_format"] is JobScore
     # Scoring is a bounded classification — no reason to pay for deep reasoning.
     assert call["output_config"]["effort"] == "low"
@@ -137,7 +203,7 @@ def test_cover_letter_uses_the_resume_and_strips_slop(fake_llm):
 
     system = messages.calls[0]["system"]
     assert "Ten years shipping developer platforms." in system
-    assert messages.calls[0]["model"] == llm.MODEL
+    assert messages.calls[0]["model"] == llm.get_model()
     assert "Stripe" in messages.calls[0]["messages"][0]["content"]
 
 
