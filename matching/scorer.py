@@ -1,10 +1,10 @@
-"""Score jobs against user criteria using Claude."""
+"""Score jobs against user criteria using Gemini."""
 import json
 import os
-import anthropic
+import google.generativeai as genai
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-MODEL = "claude-sonnet-4-6"
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+MODEL = "gemini-1.5-flash"
 
 
 def score_job(job: dict, criteria: dict) -> tuple[int, str]:
@@ -34,12 +34,9 @@ Score 90-100 = excellent match, 70-89 = good match, 50-69 = partial, <50 = poor 
 Only score ≥70 should be included in a digest. Be honest and specific."""
 
     try:
-        msg = client.messages.create(
-            model=MODEL,
-            max_tokens=150,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = msg.content[0].text.strip()
+        model = genai.GenerativeModel(MODEL)
+        msg = model.generate_content(prompt)
+        text = msg.text.strip()
         # extract JSON even if wrapped in markdown
         if "```" in text:
             text = text.split("```")[1].replace("json", "").strip()
