@@ -56,7 +56,12 @@
 
       <section class="settings-section">
         <h2>Job Sources</h2>
-        <p class="section-note">Add company slugs to watch on Greenhouse and Lever. These are the company identifiers in their job board URLs.</p>
+        <p class="section-note">
+          These are pre-filled with well-known companies so you get matches straight
+          away — edit them freely. Each entry is the company's identifier in its job
+          board URL: <code>boards.greenhouse.io/<strong>stripe</strong></code> or
+          <code>jobs.lever.co/<strong>plaid</strong></code>.
+        </p>
 
         <label>Greenhouse companies <span class="hint">e.g. stripe, airbnb, notion</span></label>
         <input type="text" name="greenhouse_companies" value="{{ ', '.join(criteria.get('greenhouse_companies', [])) }}" placeholder="stripe, airbnb, linear">

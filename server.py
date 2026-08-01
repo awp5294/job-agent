@@ -37,14 +37,14 @@ from db.database import (
     create_user, finish_digest_run, get_all_users, get_criteria,
     get_digest_batch_jobs, get_latest_digest_batch, get_latest_digest_run,
     get_owned_user_job, get_session, get_session_state, get_unsent_user_jobs,
-    get_user, get_user_by_email, get_user_by_invite_token,
+    get_user, get_user_by_email, get_user_by_invite_token, get_user_job,
     get_user_by_login_token, get_user_jobs, init_db, mark_digest_sent,
     set_session_state, start_digest_run, update_criteria, update_user,
     update_user_job, upsert_job, upsert_user_job,
 )
 from email_handler.gmail import (
     get_gmail_service, get_oauth_flow, get_verified_email, oauth_configured,
-    poll_for_replies, send_digest_email, smtp_configured,
+    poll_for_replies, send_application_email, send_digest_email, smtp_configured,
 )
 from llm import LLMError
 from matching.scorer import score_jobs_for_user
@@ -63,6 +63,19 @@ REQUIRE_INVITE = os.environ.get("REQUIRE_INVITE", "1") not in ("0", "false", "Fa
 ENABLE_SCHEDULER = os.environ.get("ENABLE_SCHEDULER", "1") not in ("0", "false", "False")
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "8"))
 TIMEZONE = os.environ.get("TIMEZONE", "UTC")
+# How many jobs go in one digest email.
+DIGEST_LIMIT = int(os.environ.get("DIGEST_LIMIT", "10"))
+# How often to check for replies to a digest.
+REPLY_POLL_MINUTES = int(os.environ.get("REPLY_POLL_MINUTES", "15"))
+
+# New accounts start watching these company job boards, so a friend gets real
+# matches from onboarding alone without knowing what a "board slug" is. They
+# can add or remove companies in Settings afterwards.
+DEFAULT_GREENHOUSE_COMPANIES = [
+    "stripe", "airbnb", "doordash", "coinbase", "robinhood", "instacart",
+    "reddit", "dropbox", "gitlab", "databricks", "anthropic", "discord",
+]
+DEFAULT_LEVER_COMPANIES = ["plaid", "ramp", "attentive"]
 
 signer = URLSafeSerializer(SECRET_KEY)
 scheduler = AsyncIOScheduler(timezone=TIMEZONE)
@@ -73,6 +86,9 @@ async def lifespan(app: FastAPI):
     init_db(DB_PATH)
     if ENABLE_SCHEDULER:
         scheduler.add_job(run_all_digests, "cron", hour=DIGEST_HOUR, minute=0)
+        # Without this, replying to the digest does nothing until someone opens
+        # the dashboard and asks for a check.
+        scheduler.add_job(poll_all_replies, "interval", minutes=REPLY_POLL_MINUTES)
         scheduler.start()
     yield
     if ENABLE_SCHEDULER and scheduler.running:
@@ -285,7 +301,12 @@ def create_account_from_state(state: dict, email: str) -> int:
     data = state.get("data", {})
     inviter = get_user_by_invite_token(state.get("invite_token", ""))
     user_id = create_user(data.get("name") or "There", email)
-    update_criteria(user_id, {k: v for k, v in data.items() if k in CRITERIA_KEYS})
+
+    criteria = {k: v for k, v in data.items() if k in CRITERIA_KEYS}
+    # Seed the job boards so the first digest has somewhere to look.
+    criteria["greenhouse_companies"] = list(DEFAULT_GREENHOUSE_COMPANIES)
+    criteria["lever_companies"] = list(DEFAULT_LEVER_COMPANIES)
+    update_criteria(user_id, criteria)
     if data.get("resume_text"):
         update_user(user_id, {"resume_text": data["resume_text"]})
     if inviter:
@@ -732,7 +753,9 @@ async def run_digest_for_user(user_id: int) -> dict:
     for job, score, reason in scored:
         upsert_user_job(user_id=user_id, job_id=job["id"], score=score, score_reason=reason)
 
-    unsent = get_unsent_user_jobs(user_id)
+    # Send the best DIGEST_LIMIT matches. Anything below the cut stays 'new'
+    # and goes out in a later digest, so nothing is lost.
+    unsent = get_unsent_user_jobs(user_id)[:DIGEST_LIMIT]
     if not unsent:
         finish_digest_run(
             run_id, "ok", len(all_jobs), len(scored),
@@ -777,18 +800,21 @@ async def run_all_digests():
 
 
 # ── Replies ────────────────────────────────────────────────────────────────
+# The whole point of the digest is that you reply to it from your phone and the
+# agent takes it from there, so this runs on a schedule — not only when someone
+# happens to have the dashboard open.
 
-@app.post("/api/poll-replies")
-async def api_poll_replies(request: Request):
-    user = require_user(request)
-    if not user.get("gmail_credentials"):
-        return JSONResponse({"ok": False, "message": "No Gmail connected"})
+async def poll_replies_for_user(user_id: int) -> dict:
+    """Read replies, then write a cover letter for each chosen job and send it back."""
+    user = get_user(user_id)
+    if not user or not user.get("gmail_credentials"):
+        return {"ok": False, "message": "No Gmail connected", "selected": []}
 
-    batch = get_latest_digest_batch(user["id"])
+    batch = get_latest_digest_batch(user_id)
     if not batch:
-        return JSONResponse({"ok": True, "selected": [], "message": "No digest sent yet"})
+        return {"ok": True, "message": "No digest sent yet", "selected": []}
 
-    sent_jobs = get_digest_batch_jobs(user["id"], batch)
+    sent_jobs = get_digest_batch_jobs(user_id, batch)
     by_position = {uj["digest_position"]: uj for uj in sent_jobs}
 
     try:
@@ -797,18 +823,73 @@ async def api_poll_replies(request: Request):
             poll_for_replies, service, user["email"], len(sent_jobs)
         )
     except Exception as exc:
-        return JSONResponse({"ok": False, "message": f"Could not read replies: {exc}"})
+        return {"ok": False, "message": f"Could not read replies: {exc}", "selected": []}
 
-    selected = []
+    criteria = get_criteria(user_id) or {}
+    selected, prepared = [], []
+
     for number in numbers:
         uj = by_position.get(number)
         # Only act on jobs still sitting in the digest — replying twice, or a
         # number that also appears in quoted text, shouldn't undo later work.
-        if uj and uj["status"] == "sent":
-            update_user_job(uj["id"], {
-                "status": "selected",
-                "selected_at": datetime.utcnow().isoformat(),
-            })
-            selected.append(uj["id"])
+        if not uj or uj["status"] != "sent":
+            continue
 
-    return JSONResponse({"ok": True, "selected": selected})
+        full = get_user_job(uj["id"])
+        cover_letter, note = "", ""
+        try:
+            cover_letter = await asyncio.to_thread(
+                generate_cover_letter,
+                job_title=full["title"],
+                company=full.get("company", ""),
+                job_description=full.get("description", ""),
+                resume_text=user.get("resume_text") or "",
+                criteria=criteria,
+            )
+        except LLMError as exc:
+            # Still select the job — the person asked for it. They just get the
+            # link without a letter, and can retry from the dashboard.
+            note = f"Cover letter failed: {exc}"
+            print(f"[replies] user {user_id} job {uj['id']}: {note}")
+
+        update_user_job(uj["id"], {
+            "status": "selected",
+            "selected_at": datetime.utcnow().isoformat(),
+            "cover_letter_text": cover_letter,
+        })
+        selected.append(uj["id"])
+        prepared.append({
+            "title": full["title"],
+            "company": full.get("company", ""),
+            "apply_url": full.get("apply_url", ""),
+            "cover_letter": cover_letter,
+            "note": note,
+        })
+
+    if prepared:
+        try:
+            await asyncio.to_thread(
+                send_application_email, service, user["email"], user["name"], prepared
+            )
+        except Exception as exc:
+            print(f"[replies] user {user_id}: could not send the application email: {exc}")
+
+    return {"ok": True, "selected": selected, "prepared": len(prepared)}
+
+
+@app.post("/api/poll-replies")
+async def api_poll_replies(request: Request):
+    user = require_user(request)
+    result = await poll_replies_for_user(user["id"])
+    return JSONResponse(result)
+
+
+async def poll_all_replies():
+    """Every REPLY_POLL_MINUTES: check everyone's inbox for digest replies."""
+    for user in get_all_users():
+        if not user.get("gmail_credentials"):
+            continue
+        try:
+            await poll_replies_for_user(user["id"])
+        except Exception as exc:
+            print(f"[replies] user {user['id']} failed: {exc}")

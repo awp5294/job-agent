@@ -48,6 +48,8 @@ you sign in with the private link shown at the end of onboarding.
 | `REQUIRE_INVITE` | No | Defaults to `1`. Set to `0` to let anyone with the URL sign up. |
 | `ANTHROPIC_MODEL` | No | Defaults to `claude-opus-5` |
 | `DIGEST_HOUR` / `TIMEZONE` | No | When the daily digest runs. Defaults to 8am UTC. |
+| `DIGEST_LIMIT` | No | Jobs per digest email. Defaults to 10. |
+| `REPLY_POLL_MINUTES` | No | How often to check for replies. Defaults to 15. |
 | `DB_PATH` | No | SQLite file location. Defaults to `jobagent.db`. |
 
 ## How Sign-In Works
@@ -101,11 +103,15 @@ Note: SQLite lives on the container's disk. On a host with an ephemeral filesyst
 
 ## Job Sources
 
-**Greenhouse & Lever** — add company slugs in Settings. The slug is the identifier in the
-job board URL:
+**Greenhouse & Lever** — new accounts are pre-filled with a list of well-known companies,
+so a friend gets real matches from onboarding alone. Anyone can edit the list in
+Settings. A slug is the company's identifier in its job board URL:
 
 - `https://boards.greenhouse.io/stripe` → slug is `stripe`
 - `https://jobs.lever.co/vercel` → slug is `vercel`
+
+If a company in the default list has moved off that board, it just contributes no jobs
+and the digest notes it — it doesn't break the run.
 
 **Indeed** — searched automatically from your job titles and locations. Indeed actively
 blocks scrapers, so it often returns nothing; the digest reports that as a note rather
@@ -114,16 +120,27 @@ than failing. Greenhouse and Lever are the reliable sources.
 ## How It Works
 
 1. **Daily at `DIGEST_HOUR`** — fetch jobs from every configured source, score each
-   against your criteria with Claude, store the ones scoring ≥70%
-2. **Email digest** — a numbered list to your inbox. The numbers are stored, so a reply
-   maps back to the right jobs.
-3. **You reply** — `1, 3, 5`. Quoted text in the reply is ignored, so the digest's own
-   numbers aren't read back as selections.
-4. **Cover letter** — Claude writes one per selected job; the stop-slop filter strips AI
-   tells before you see it
-5. **Dashboard** — review and edit the letter, then open the application in a new tab
+   against your criteria with Claude, and keep the ones scoring ≥70%
+2. **Email digest** — the top `DIGEST_LIMIT` (default 10) matches, numbered, to your
+   inbox. Anything below the cut stays queued for the next digest.
+3. **You reply** — `1, 3, 5`. Quoted text is ignored, so the digest's own numbers aren't
+   read back as selections.
+4. **The agent picks it up within `REPLY_POLL_MINUTES`** (default 15), writes a tailored
+   cover letter for each job you picked, and emails them back to you with a direct
+   apply link per job.
+5. **You tap the link and submit.** Everything is also on the dashboard if you'd rather
+   edit a letter first.
 
 You can also hit **Run digest** on the dashboard to do all of this on demand.
+
+### What "auto apply" does and doesn't do
+
+Steps 1–4 are fully automatic — you reply to an email and the cover letters arrive
+written. The final submit is still yours: the agent does not blind-fill and submit
+employer application forms. Those forms vary by company, usually want a resume file
+upload and custom questions, and an application can't be un-sent, so a garbled
+auto-submission burns that opportunity. `apply/browser.py` has an optional Playwright
+form pre-filler if you want to experiment locally.
 
 ## Running the Tests
 

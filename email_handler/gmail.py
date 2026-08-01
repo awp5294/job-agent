@@ -77,6 +77,40 @@ def build_digest_message(to_email: str, user_name: str, jobs: list[dict]) -> MIM
     return msg
 
 
+def build_application_message(to_email: str, user_name: str,
+                              items: list[dict]) -> MIMEMultipart:
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"Ready to apply — {len(items)} cover letter" + \
+        ("s" if len(items) != 1 else "")
+    msg["To"] = to_email
+    msg["From"] = os.getenv("SMTP_USER") or to_email
+    msg.attach(MIMEText(_build_application_text(user_name, items), "plain"))
+    msg.attach(MIMEText(_build_application_html(user_name, items), "html"))
+    return msg
+
+
+def send_application_email(service, to_email: str, user_name: str,
+                           items: list[dict]) -> str | None:
+    """Send the cover letters for the jobs the user picked, with apply links."""
+    msg = build_application_message(to_email, user_name, items)
+
+    if service is not None:
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        result = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return result.get("threadId")
+
+    if not smtp_configured():
+        raise RuntimeError("No way to send email: connect Gmail, or set SMTP_USER/SMTP_PASS.")
+
+    with smtplib.SMTP(
+        os.getenv("SMTP_HOST", "smtp.gmail.com"), int(os.getenv("SMTP_PORT", "587"))
+    ) as smtp:
+        smtp.starttls()
+        smtp.login(os.getenv("SMTP_USER", ""), os.getenv("SMTP_PASS", ""))
+        smtp.sendmail(msg["From"], to_email, msg.as_string())
+    return None
+
+
 def send_digest_email(service, to_email: str, user_name: str,
                       jobs: list[dict]) -> str | None:
     """Send the digest. Jobs are numbered in the order given.
@@ -196,6 +230,66 @@ def _build_digest_html(user_name: str, jobs: list[dict]) -> str:
     <p style="margin:8px 0 0;color:#888;font-size:12px">Those jobs move to Selected on your dashboard, where the agent writes a tailored cover letter for each.</p>
   </div>
 </body></html>"""
+
+
+def _build_application_html(user_name: str, items: list[dict]) -> str:
+    blocks = ""
+    for item in items:
+        letter = (item.get("cover_letter") or "").strip()
+        body = (
+            f'<pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;'
+            f'background:#fafafa;border:1px solid #eee;border-radius:8px;padding:14px;'
+            f'margin:12px 0">{_escape(letter)}</pre>'
+            if letter else
+            f'<p style="color:#b45309;margin:12px 0">No cover letter — '
+            f'{_escape(item.get("note") or "generation failed")}. '
+            f'You can retry from your dashboard.</p>'
+        )
+        blocks += f"""
+        <div style="padding:20px 0;border-bottom:1px solid #f0f0f0">
+          <strong style="font-size:16px">{_escape(item.get('title', ''))}</strong>
+          <span style="color:#666"> · {_escape(item.get('company', ''))}</span>
+          {body}
+          <a href="{_escape(item.get('apply_url', ''))}"
+             style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;
+                    padding:10px 18px;border-radius:8px;font-weight:600">
+            Open the application →
+          </a>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#222">
+  <div style="background:#6366f1;padding:24px;border-radius:12px 12px 0 0">
+    <h2 style="color:white;margin:0">Your cover letters are ready</h2>
+    <p style="color:#c7d2fe;margin:4px 0 0">Hi {_escape(user_name)} — {len(items)} job(s) from your reply</p>
+  </div>
+  <div style="padding:0 20px">{blocks}</div>
+  <div style="padding:20px;background:#f9f9f9;border-radius:0 0 12px 12px;color:#555;font-size:13px">
+    Copy the letter, tap the button, and paste it into the form. Everything is
+    also on your dashboard if you'd rather edit it there first.
+  </div>
+</body></html>"""
+
+
+def _build_application_text(user_name: str, items: list[dict]) -> str:
+    lines = [f"Hi {user_name} — cover letters for the {len(items)} job(s) you picked.\n"]
+    for item in items:
+        lines.append(f"{item.get('title','')} @ {item.get('company','')}")
+        lines.append(f"Apply: {item.get('apply_url','')}\n")
+        letter = (item.get("cover_letter") or "").strip()
+        lines.append(letter if letter else
+                     f"(No cover letter — {item.get('note') or 'generation failed'})")
+        lines.append("\n" + "-" * 60 + "\n")
+    return "\n".join(lines)
+
+
+def _escape(value: str) -> str:
+    """Job titles and companies come from scraped pages."""
+    return (
+        str(value or "")
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
 
 
 def _build_digest_text(user_name: str, jobs: list[dict]) -> str:
