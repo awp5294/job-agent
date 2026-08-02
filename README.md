@@ -15,7 +15,7 @@ share it with friends and each of them runs their own search.
 - A tailored cover letter per job, with a stop-slop filter over the output
 - Dashboard: New Matches / Selected / Applied
 - Multi-user: share an invite link; each person gets their own account, criteria and jobs
-- Sources: Greenhouse API, Lever API, Indeed
+- Sources: Remotive (keyword search), Greenhouse API, Lever API, Indeed
 
 ## Quick Start (local)
 
@@ -124,19 +124,35 @@ Note: SQLite lives on the container's disk. On a host with an ephemeral filesyst
 
 ## Job Sources
 
-**Greenhouse & Lever** — new accounts are pre-filled with a list of well-known companies,
-so a friend gets real matches from onboarding alone. Anyone can edit the list in
+**Remotive** — searched by your job titles, across thousands of companies at once.
+This is what gives a brand-new account real matches without naming any company.
+Remote roles only. Public API, no key.
+
+**Greenhouse & Lever** — these answer "what is company X hiring for?", so they need a
+company list. New accounts are pre-filled with well-known companies; edit the list in
 Settings. A slug is the company's identifier in its job board URL:
 
 - `https://boards.greenhouse.io/stripe` → slug is `stripe`
 - `https://jobs.lever.co/vercel` → slug is `vercel`
 
-If a company in the default list has moved off that board, it just contributes no jobs
-and the digest notes it — it doesn't break the run.
+If a company in the default list has moved off that board, it contributes no jobs and
+the digest notes it — it doesn't break the run.
 
-**Indeed** — searched automatically from your job titles and locations. Indeed actively
-blocks scrapers, so it often returns nothing; the digest reports that as a note rather
-than failing. Greenhouse and Lever are the reliable sources.
+**Indeed** — searched from your titles and locations, but Indeed actively blocks
+scrapers, so it usually returns nothing. Treat anything it finds as a bonus.
+
+### Why not LinkedIn
+
+LinkedIn has no public jobs API, requires a logged-in session to see postings, and its
+terms prohibit scraping. Doing it anyway means running a logged-in account against
+their anti-bot systems — which gets the account restricted or banned, and it would be
+*your* account, since there's no other way to authenticate. That risk lands on a real
+person's professional profile, so this app doesn't do it.
+
+The sources above cover the same ground for the companies that matter: nearly every
+startup and tech company posts to Greenhouse, Lever, or Ashby, and Remotive aggregates
+remote roles across all of them. Adding a company slug in Settings gets you that
+company's full posting list, straight from the source and always current.
 
 ## How It Works
 

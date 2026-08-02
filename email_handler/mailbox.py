@@ -125,9 +125,29 @@ def strip_quoted(body: str) -> str:
     return body[: match.start()] if match else body
 
 
+ALL_PATTERN = re.compile(
+    r"\b(all of (them|these|the above)|all|every one|everything|yes to all)\b",
+    re.IGNORECASE,
+)
+NONE_PATTERN = re.compile(
+    r"\b(none|no thanks|not interested|skip( them)?( all)?|pass)\b", re.IGNORECASE
+)
+
+
 def extract_reply_numbers(body: str, max_number: int) -> list[int]:
-    """The job numbers someone replied with, bounded by the digest length."""
-    numbers = {int(n) for n in re.findall(r"\b\d{1,3}\b", strip_quoted(body))}
+    """The job numbers someone replied with, bounded by the digest length.
+
+    People write "apply to 1, 3 and 5", "1 2 5", or just "all" — take numbers
+    wherever they appear in the reply, and treat "all" as every job in it.
+    """
+    reply = strip_quoted(body)
+
+    if NONE_PATTERN.search(reply):
+        return []
+    if ALL_PATTERN.search(reply):
+        return list(range(1, max_number + 1))
+
+    numbers = {int(n) for n in re.findall(r"\b\d{1,3}\b", reply)}
     return sorted(n for n in numbers if 1 <= n <= max_number)
 
 

@@ -39,6 +39,7 @@ def stub_sources(monkeypatch):
     monkeypatch.setattr(server, "fetch_greenhouse_jobs", lambda slug: list(GREENHOUSE_JOBS))
     monkeypatch.setattr(server, "fetch_lever_jobs", lambda slug: list(LEVER_JOBS))
     monkeypatch.setattr(server, "fetch_indeed_jobs", lambda titles, locations: [])
+    monkeypatch.setattr(server, "fetch_remotive_jobs", lambda titles: [])
 
     def fake_score(all_jobs, user_id, criteria):
         results = []
@@ -118,6 +119,7 @@ def test_digest_sends_ten_jobs_and_saves_the_rest_for_next_time(signed_up, sent_
     monkeypatch.setattr(server, "fetch_greenhouse_jobs", lambda slug: list(many))
     monkeypatch.setattr(server, "fetch_lever_jobs", lambda slug: [])
     monkeypatch.setattr(server, "fetch_indeed_jobs", lambda t, l: [])
+    monkeypatch.setattr(server, "fetch_remotive_jobs", lambda titles: [])
     # Descending scores, so the cut is by quality rather than arbitrary.
     monkeypatch.setattr(
         server, "score_jobs_for_user",
@@ -162,6 +164,7 @@ def test_digest_records_source_failures_instead_of_swallowing_them(signed_up, mo
     monkeypatch.setattr(server, "fetch_greenhouse_jobs", broken)
     monkeypatch.setattr(server, "fetch_lever_jobs", lambda slug: [])
     monkeypatch.setattr(server, "fetch_indeed_jobs", lambda t, l: [])
+    monkeypatch.setattr(server, "fetch_remotive_jobs", lambda titles: [])
     monkeypatch.setattr(server, "score_jobs_for_user", lambda j, u, c: [])
 
     asyncio.run(server.run_digest_for_user(user["id"]))
@@ -430,8 +433,8 @@ def test_digest_email_numbers_jobs_in_order():
          "score": 88, "score_reason": "Also good.", "apply_url": "https://x/2"},
     ]
     text = build_digest_text("Ada", jobs)
-    assert "1. Staff PM @ Stripe" in text
-    assert "2. Senior PM @ Figma" in text
+    assert "1. Staff PM — Stripe" in text
+    assert "2. Senior PM — Figma" in text
 
     message = build_message("ada@example.com", digest_subject(jobs),
                             text, "<html></html>")

@@ -57,6 +57,7 @@ from matching.scorer import score_jobs_for_user
 from sourcing.greenhouse import fetch_greenhouse_jobs
 from sourcing.indeed import fetch_indeed_jobs
 from sourcing.lever import fetch_lever_jobs
+from sourcing.remotive import fetch_remotive_jobs
 
 # ── Config ─────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -736,6 +737,13 @@ def _collect_jobs(criteria: dict) -> tuple[list[dict], list[str]]:
 
     titles = criteria.get("job_titles", [])
     if titles:
+        # Keyword search across thousands of companies, so a new account gets
+        # real matches without naming any company.
+        try:
+            jobs.extend(fetch_remotive_jobs(titles))
+        except Exception as exc:
+            problems.append(f"remotive: {exc}")
+
         try:
             found = fetch_indeed_jobs(titles, criteria.get("locations", []))
             if not found:
