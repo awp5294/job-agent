@@ -433,12 +433,12 @@ def test_digest_email_numbers_jobs_in_order():
          "score": 88, "score_reason": "Also good.", "apply_url": "https://x/2"},
     ]
     text = build_digest_text("Ada", jobs)
-    assert "1. Staff PM — Stripe" in text
-    assert "2. Senior PM — Figma" in text
+    assert "1. Staff PM at Stripe" in text
+    assert "2. Senior PM at Figma" in text
 
     message = build_message("ada@example.com", digest_subject(jobs),
                             text, "<html></html>")
-    assert "2 matches" in message["Subject"]
+    assert "2 job matches" in message["Subject"]
     assert message["To"] == "ada@example.com"
     assert {part.get_content_type() for part in message.get_payload()} == {
         "text/plain", "text/html"

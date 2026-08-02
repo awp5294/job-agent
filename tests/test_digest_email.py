@@ -2,7 +2,8 @@
 import pytest
 
 from email_handler.digest import (
-    build_digest_html, build_digest_text, digest_subject, summarise,
+    application_subject, build_application_html, build_application_text,
+    build_digest_html, build_digest_text, digest_subject, plural, summarise,
 )
 from email_handler.mailbox import extract_reply_numbers
 
@@ -58,22 +59,89 @@ def test_a_job_without_a_salary_still_renders():
 
 def test_the_plain_text_version_has_the_same_facts():
     text = build_digest_text("Anthony", JOBS)
-    assert "1. Staff Product Manager, Payments — Anthropic" in text
+    assert "1. Staff Product Manager, Payments at Anthropic" in text
     assert "San Francisco / Remote · $180,000–$240,000" in text
     assert "payments platform roadmap" in text
     assert "https://boards.greenhouse.io/anthropic/jobs/1" in text
-    assert "2. Senior PM, Growth — Figma" in text
+    assert "2. Senior PM, Growth at Figma" in text
 
 
-def test_the_email_says_how_to_reply():
-    for body in (build_digest_html("A", JOBS), build_digest_text("A", JOBS)):
-        assert "Reply" in body
-        assert "1, 3 and 5" in body
-        assert "all" in body
+LETTERS = [
+    {"title": "Staff Product Manager, Payments", "company": "Anthropic",
+     "apply_url": "https://boards.greenhouse.io/anthropic/jobs/1",
+     "cover_letter": "I led the ledger migration at Acme.", "note": ""},
+]
 
 
-def test_the_subject_says_how_many():
-    assert digest_subject(JOBS).startswith("Your job digest — 2 matches")
+# ── Telling the reader what to do ──────────────────────────────────────────
+
+def test_the_digest_spells_out_all_three_next_steps():
+    """Someone reading on a phone should not have to guess what happens."""
+    for body in (build_digest_html("Anthony", JOBS), build_digest_text("Anthony", JOBS)):
+        assert "Reply to this email with the numbers you want" in body
+        assert '"1, 3, 5"' in body                     # how to phrase it
+        assert "cover letter for each job you picked" in body   # what happens after
+        assert "paste the letter in, and submit" in body.lower()  # their final move
+        assert "15 minutes" in body                    # when to expect it
+
+
+def test_the_digest_says_what_to_do_if_nothing_appeals():
+    for body in (build_digest_html("Anthony", JOBS), build_digest_text("Anthony", JOBS)):
+        assert '"none"' in body
+
+
+def test_the_cover_letter_email_spells_out_its_steps():
+    for body in (build_application_html("Anthony", LETTERS),
+                 build_application_text("Anthony", LETTERS)):
+        assert "Copy the cover letter" in body
+        assert "attach your resume" in body
+        assert "dashboard" in body
+
+
+def test_subjects_count_correctly_and_read_naturally():
+    assert digest_subject(JOBS).startswith("2 job matches for you")
+    assert digest_subject([JOBS[0]]).startswith("1 job match for you")
+    assert application_subject(LETTERS) == "Your cover letter is ready"
+    assert application_subject(LETTERS * 3) == "Your 3 cover letters are ready"
+
+
+@pytest.mark.parametrize("count,word,expected", [
+    (1, "job match", "1 job match"),
+    (3, "job match", "3 job matches"),
+    (1, "cover letter", "1 cover letter"),
+    (2, "cover letter", "2 cover letters"),
+    (2, "box", "2 boxes"),
+])
+def test_plural_handles_words_that_need_es(count, word, expected):
+    assert plural(count, word) == expected
+
+
+# ── Keeping the copy human ─────────────────────────────────────────────────
+
+SLOP = [
+    "seamless", "leverage", "delve", "robust", "elevate", "unlock",
+    "empower", "streamline", "supercharge", "effortlessly", "curated",
+    "journey", "in today's", "we're excited", "simply", "just a few clicks",
+]
+
+
+@pytest.mark.parametrize("phrase", SLOP)
+def test_the_emails_avoid_marketing_slop(phrase):
+    bodies = [
+        build_digest_html("Anthony", JOBS), build_digest_text("Anthony", JOBS),
+        build_application_html("Anthony", LETTERS),
+        build_application_text("Anthony", LETTERS),
+    ]
+    for body in bodies:
+        assert phrase not in body.lower(), f"{phrase!r} crept into the email copy"
+
+
+def test_no_em_dashes_in_the_emails():
+    """They read as AI-written, and mangle in some plain-text clients."""
+    for body in (build_digest_text("Anthony", JOBS),
+                 build_application_text("Anthony", LETTERS),
+                 digest_subject(JOBS), application_subject(LETTERS)):
+        assert "—" not in body
 
 
 def test_scraped_html_cannot_break_the_email():

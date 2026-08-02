@@ -8,12 +8,21 @@ from datetime import datetime
 from html import unescape
 
 
+def plural(count: int, word: str) -> str:
+    """Count plus the word, pluralised. Handles "job match" -> "job matches"."""
+    if count == 1:
+        return f"{count} {word}"
+    suffix = "es" if word.endswith(("s", "x", "z", "ch", "sh")) else "s"
+    return f"{count} {word}{suffix}"
+
+
 def digest_subject(jobs: list) -> str:
-    return f"Your job digest — {len(jobs)} matches · {datetime.now().strftime('%b %d')}"
+    return f"{plural(len(jobs), 'job match')} for you, {datetime.now().strftime('%b %d')}"
 
 
 def application_subject(items: list) -> str:
-    return f"Ready to apply — {len(items)} cover letter" + ("s" if len(items) != 1 else "")
+    return f"Your {plural(len(items), 'cover letter')} are ready" if len(items) != 1 \
+        else "Your cover letter is ready"
 
 
 def _escape(value: str) -> str:
@@ -86,31 +95,54 @@ def build_digest_html(user_name: str, jobs: list[dict]) -> str:
     return f"""<!DOCTYPE html>
 <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#222">
   <div style="background:#6366f1;padding:24px;border-radius:12px 12px 0 0">
-    <h2 style="color:white;margin:0">Your job digest</h2>
-    <p style="color:#c7d2fe;margin:4px 0 0">Hi {_escape(user_name)} — {len(jobs)} matches today</p>
+    <h2 style="color:white;margin:0">{_escape(plural(len(jobs), 'job'))} worth a look</h2>
+    <p style="color:#c7d2fe;margin:4px 0 0">Morning {_escape(user_name)}. Here's what came up today.</p>
   </div>
   <table style="width:100%;border-collapse:collapse">{items}</table>
   <div style="padding:20px;background:#f9f9f9;border-radius:0 0 12px 12px">
-    <p style="margin:0;color:#333;font-size:15px"><strong>Reply to this email with the numbers you want</strong> — for example "apply to 1, 3 and 5", or just "all".</p>
-    <p style="margin:8px 0 0;color:#888;font-size:13px">Within about 15 minutes you'll get a tailored cover letter for each one, with a link straight to its application form.</p>
+    <p style="margin:0 0 12px;color:#222;font-size:15px;font-weight:600">What to do next</p>
+    <ol style="margin:0;padding-left:20px;color:#444;font-size:14px;line-height:1.7">
+      <li><strong>Reply to this email with the numbers you want.</strong>
+          "1, 3, 5" works. So does "apply to 1 and 3", or "all".</li>
+      <li>The agent writes a cover letter for each job you picked and sends
+          them back, usually inside 15 minutes.</li>
+      <li>Open the link in that email, paste the letter in, and submit.</li>
+    </ol>
+    <p style="margin:14px 0 0;color:#888;font-size:13px">
+      Nothing for you here? Reply "none", or ignore this. Tomorrow's batch arrives
+      at the same time.
+    </p>
   </div>
 </body></html>"""
 
 
 def build_digest_text(user_name: str, jobs: list[dict]) -> str:
-    lines = [f"Hi {user_name} — {len(jobs)} job matches today\n"]
+    lines = [
+        f"Morning {user_name}. Here's what came up today: "
+        f"{plural(len(jobs), 'job')} worth a look.\n",
+    ]
     for i, job in enumerate(jobs, 1):
         meta = _meta_line(job)
         lines.append(
-            f"{i}. {job.get('title', '')} — {job.get('company', '')}"
-            f"{f' ({meta})' if meta else ''} — {job.get('score', 0)}% match"
+            f"{i}. {job.get('title', '')} at {job.get('company', '')}"
+            f"{f' ({meta})' if meta else ''} [{job.get('score', 0)}% match]"
         )
         snippet = summarise(job.get("description") or "", limit=180)
         if snippet:
             lines.append(f"   {snippet}")
         lines.append(f"   Why: {job.get('score_reason', '')}")
         lines.append(f"   {job.get('apply_url', '')}\n")
-    lines.append('Reply with the numbers you want — e.g. "apply to 1, 3 and 5", or "all".')
+
+    lines.append("")
+    lines.append("WHAT TO DO NEXT")
+    lines.append('1. Reply to this email with the numbers you want. "1, 3, 5" works.')
+    lines.append('   So does "apply to 1 and 3", or "all".')
+    lines.append("2. The agent writes a cover letter for each job you picked and")
+    lines.append("   sends them back, usually inside 15 minutes.")
+    lines.append("3. Open the link in that email, paste the letter in, and submit.")
+    lines.append("")
+    lines.append('Nothing for you here? Reply "none", or ignore this. Tomorrow\'s')
+    lines.append("batch arrives at the same time.")
     return "\n".join(lines)
 
 
@@ -125,8 +157,8 @@ def build_application_html(user_name: str, items: list[dict]) -> str:
             f"background:#fafafa;border:1px solid #eee;border-radius:8px;padding:14px;"
             f'margin:12px 0">{_escape(letter)}</pre>'
             if letter else
-            f'<p style="color:#b45309;margin:12px 0">No cover letter — '
-            f'{_escape(item.get("note") or "generation failed")}. '
+            f'<p style="color:#b45309;margin:12px 0">No cover letter for this one. '
+            f'{_escape(item.get("note") or "Generation failed")}. '
             f"You can retry from your dashboard.</p>"
         )
         blocks += f"""
@@ -144,24 +176,46 @@ def build_application_html(user_name: str, items: list[dict]) -> str:
     return f"""<!DOCTYPE html>
 <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#222">
   <div style="background:#6366f1;padding:24px;border-radius:12px 12px 0 0">
-    <h2 style="color:white;margin:0">Your cover letters are ready</h2>
-    <p style="color:#c7d2fe;margin:4px 0 0">Hi {_escape(user_name)} — {len(items)} job(s) from your reply</p>
+    <h2 style="color:white;margin:0">{_escape(application_subject(items))}</h2>
+    <p style="color:#c7d2fe;margin:4px 0 0">
+      {_escape(user_name)}, you picked {_escape(plural(len(items), 'job'))}. Written and waiting below.
+    </p>
   </div>
-  <div style="padding:0 20px">{blocks}</div>
+  <div style="padding:0 20px;background:#fff">
+    <div style="padding:18px 0 4px">
+      <p style="margin:0 0 10px;color:#222;font-size:15px;font-weight:600">For each job below</p>
+      <ol style="margin:0;padding-left:20px;color:#444;font-size:14px;line-height:1.7">
+        <li>Copy the cover letter.</li>
+        <li>Click <strong>Open the application</strong> to reach the form.</li>
+        <li>Paste the letter in, attach your resume, and submit.</li>
+      </ol>
+    </div>
+    {blocks}
+  </div>
   <div style="padding:20px;background:#f9f9f9;border-radius:0 0 12px 12px;color:#555;font-size:13px">
-    Copy the letter, tap the button, and paste it into the form. Everything is
-    also on your dashboard if you'd rather edit it there first.
+    Want to change the wording first? Every letter is on your dashboard, where you
+    can edit it before you apply.
   </div>
 </body></html>"""
 
 
 def build_application_text(user_name: str, items: list[dict]) -> str:
-    lines = [f"Hi {user_name} — cover letters for the {len(items)} job(s) you picked.\n"]
+    lines = [
+        f"{user_name}, you picked {plural(len(items), 'job')}. "
+        "Written and waiting below.\n",
+        "FOR EACH JOB BELOW",
+        "1. Copy the cover letter.",
+        "2. Open the apply link.",
+        "3. Paste the letter in, attach your resume, and submit.\n",
+        "Want to change the wording first? Every letter is on your dashboard.",
+        "\n" + "=" * 60 + "\n",
+    ]
     for item in items:
-        lines.append(f"{item.get('title', '')} @ {item.get('company', '')}")
+        lines.append(f"{item.get('title', '')} at {item.get('company', '')}")
         lines.append(f"Apply: {item.get('apply_url', '')}\n")
         letter = (item.get("cover_letter") or "").strip()
         lines.append(letter if letter else
-                     f"(No cover letter — {item.get('note') or 'generation failed'})")
-        lines.append("\n" + "-" * 60 + "\n")
+                     f"(No cover letter. {item.get('note') or 'Generation failed'}. "
+                     "You can retry from your dashboard.)")
+        lines.append("\n" + "=" * 60 + "\n")
     return "\n".join(lines)
