@@ -182,12 +182,11 @@ def test_jobs_that_failed_to_store_are_skipped(monkeypatch):
 
 # ── Cover letters ──────────────────────────────────────────────────────────
 
-def test_cover_letter_uses_the_resume_and_strips_slop(fake_llm):
-    messages = fake_llm(text=(
-        "I am truly passionate about payments infrastructure. "
-        "I led the migration of a legacy ledger to a robust event-driven design.\n\n"
-        "We can leverage that experience here."
-    ))
+def test_cover_letters_go_through_claude_with_the_resume(fake_llm):
+    clean = ("The payments role lines up with my last three years. At Acme I moved "
+             "the ledger onto an event-driven design, cutting settlement from two "
+             "days to four hours.")
+    messages = fake_llm(text=clean)
 
     letter = generate_cover_letter(
         job_title="Staff PM",
@@ -196,11 +195,7 @@ def test_cover_letter_uses_the_resume_and_strips_slop(fake_llm):
         resume_text="Ten years shipping developer platforms.",
     )
 
-    assert "passionate" not in letter
-    assert "leverage" not in letter
-    assert "strong event-driven design" in letter
-    assert "use that experience here" in letter
-
+    assert letter == clean
     system = messages.calls[0]["system"]
     assert "Ten years shipping developer platforms." in system
     assert messages.calls[0]["model"] == llm.get_model()
@@ -211,17 +206,6 @@ def test_cover_letter_failures_surface_to_the_caller(fake_llm):
     fake_llm(text="", stop_reason="refusal")
     with pytest.raises(LLMError):
         generate_cover_letter("Staff PM", "Stripe", "desc", "resume")
-
-
-@pytest.mark.parametrize("raw,gone", [
-    ("I am excited to apply. I shipped three products.", "excited"),
-    ("As someone who loves data, I dig in. I shipped three products.", "As someone who"),
-    ("This is a results-driven role. I shipped three products.", "results-driven"),
-])
-def test_stop_slop_removes_offending_sentences_only(raw, gone):
-    cleaned = stop_slop(raw)
-    assert gone not in cleaned
-    assert "I shipped three products." in cleaned
 
 
 def test_stop_slop_leaves_clean_prose_alone():

@@ -18,7 +18,16 @@ Scoring bands:
   50-69   partial match
   0-49    poor match
 
-The reason must be one sentence naming the concrete factor that drove the score."""
+The reason is one sentence, read by the candidate in their morning email. Name
+the concrete thing that drove the score: the title, the location, the salary,
+a specific skill. Write it the way you'd tell a friend.
+
+  Good: "Remote and the salary band clears your floor, but it's a level below
+         what you asked for."
+  Bad:  "This role aligns well with your professional background and offers
+         exciting opportunities for growth."
+
+No filler adverbs, no em dashes, no "aligns with" or "leverages"."""
 
 
 class JobScore(BaseModel):

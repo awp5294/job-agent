@@ -12,7 +12,7 @@ share it with friends and each of them runs their own search.
 - Chat-based onboarding — set your criteria in the browser
 - Daily email digest with AI-scored matches (only ≥70% shown)
 - Reply to the email with job numbers → those jobs move to Selected
-- A tailored cover letter per job, with a stop-slop filter over the output
+- A tailored cover letter per job, checked for AI writing tells and rewritten if it has any
 - Dashboard: New Matches / Selected / Applied
 - Multi-user: share an invite link; each person gets their own account, criteria and jobs
 - Sources: Remotive (keyword search), Greenhouse API, Lever API, Indeed
@@ -169,6 +169,28 @@ company's full posting list, straight from the source and always current.
    edit a letter first.
 
 You can also hit **Run digest** on the dashboard to do all of this on demand.
+
+### Keeping the cover letters human
+
+An employer can spot a machine-written cover letter, so three things guard against it:
+
+1. **The prompt** names the patterns to avoid rather than handing over a banned-word
+   list: no stock openers, active voice, a concrete detail behind every claim, varied
+   sentence length, no em dashes.
+2. **A check** scans the draft for the tells that survived, by category: stock openers
+   and closers, buzzwords, filler adverbs, em dashes, "not just X, but Y", vague claims
+   like "significant impact" with no number attached.
+3. **One rewrite**, quoting those specific tells back at the model and telling it to keep
+   every fact and number as-is. If the rewrite isn't cleaner, the first draft is kept.
+
+What it deliberately does **not** do is edit letters with find-and-replace. An earlier
+version deleted any sentence containing a stock phrase, which threw away "Throughout my
+career I shipped 12 products at Stripe" along with the cliche, and rewrote "dynamic
+pricing engine" as "strong pricing engine". These letters go to employers, so a mangled
+sentence is worse than a slightly stiff one. Only wrappers get stripped mechanically:
+salutations, sign-offs, markdown fences.
+
+The same rules apply to the one-line "Why:" reason in the digest.
 
 ### What "auto apply" does and doesn't do
 

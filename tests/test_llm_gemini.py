@@ -104,22 +104,41 @@ def test_output_that_breaks_the_schema_is_rejected(gemini):
 
 # ── Prose ──────────────────────────────────────────────────────────────────
 
-def test_cover_letters_use_gemini_and_still_get_slop_stripped(gemini):
-    models = gemini(gemini_response(text=(
-        "I am truly passionate about payments. "
-        "I led a robust ledger migration at Acme."
-    )))
+def test_cover_letters_use_gemini_and_carry_the_resume(gemini):
+    clean = "I led the ledger migration at Acme, cutting settlement time in half."
+    models = gemini(gemini_response(text=clean))
 
     letter = generate_cover_letter(
         job_title="Staff PM", company="Stripe",
         job_description="Own payments.", resume_text="Ten years in fintech.",
     )
 
-    assert "passionate" not in letter
-    assert "strong ledger migration" in letter
+    assert letter == clean
     config = models.calls[0]["config"]
     assert "Ten years in fintech." in config.system_instruction
+    assert "No em dashes" in config.system_instruction
     assert config.max_output_tokens == 4000
+
+
+def test_a_sloppy_gemini_draft_gets_one_revision_pass(gemini, monkeypatch):
+    """The revision loop is provider-agnostic: same behaviour on Gemini."""
+    sloppy = "I am writing to express my excitement. I leveraged cutting-edge tools."
+    clean = "I moved the ledger to an event-driven design. Settlement fell to four hours."
+
+    models = FakeModels()
+    queue = [sloppy, clean]
+
+    def two_drafts(**kwargs):
+        models.calls.append(kwargs)
+        return gemini_response(text=queue.pop(0))
+
+    monkeypatch.setattr(models, "generate_content", two_drafts)
+    monkeypatch.setattr(llm, "get_client", lambda: SimpleNamespace(models=models))
+
+    letter = generate_cover_letter("Staff PM", "Stripe", "desc", "resume")
+    assert letter == clean
+    assert len(models.calls) == 2
+    assert "leverage" in models.calls[1]["contents"]
 
 
 def test_an_empty_response_is_an_error(gemini):
