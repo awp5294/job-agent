@@ -274,7 +274,9 @@ async def onboard_page(request: Request, invite: Optional[str] = None):
 
 @app.get("/signin", response_class=HTMLResponse)
 async def signin_page(request: Request, error: Optional[str] = None):
-    if get_current_user(request):
+    # A signed-in visitor has nothing to do here — unless we were sent here to
+    # explain something, in which case bouncing them back is an invisible loop.
+    if get_current_user(request) and not error:
         return RedirectResponse("/dashboard")
     sid = ensure_session(request)
     response = templates.TemplateResponse(
@@ -579,6 +581,7 @@ async def dashboard(request: Request):
         {
             "user": user,
             "gmail_connected": bool(user.get("gmail_credentials")),
+            "google_available": oauth_configured(),
         },
     )
 

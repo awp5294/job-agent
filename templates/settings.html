@@ -102,7 +102,12 @@
         <a href="/auth/gmail">Connect Gmail</a>.
       </p>
       {% else %}
-      <p>Gmail OAuth isn't configured on this deployment.</p>
+      <p class="alert-warning">
+        Gmail isn't set up on this deployment, so nobody can receive a digest or
+        reply to one. Add <code>GMAIL_CLIENT_ID</code> and
+        <code>GMAIL_CLIENT_SECRET</code> to the environment and restart —
+        the README has the Google Cloud walkthrough.
+      </p>
       {% endif %}
 
       <p class="section-note">

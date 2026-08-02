@@ -23,10 +23,20 @@
     </div>
 
     {% if not gmail_connected %}
-    <div class="alert-warning">
-      Gmail isn't connected, so daily digest emails can't be sent. Matches will
-      still show up here. <a href="/auth/gmail">Connect Gmail</a>.
-    </div>
+      {% if google_available %}
+      <div class="alert-warning">
+        Gmail isn't connected, so daily digest emails can't be sent. Matches will
+        still show up here. <a href="/auth/gmail">Connect Gmail</a>.
+      </div>
+      {% else %}
+      <div class="alert-warning">
+        <strong>Gmail isn't set up on this deployment yet</strong>, so no digest
+        emails can be sent and replies can't be read — matches will only appear
+        on this page. Whoever runs this Job Agent needs to add
+        <code>GMAIL_CLIENT_ID</code> and <code>GMAIL_CLIENT_SECRET</code>
+        (the ~10 minute Google Cloud setup in the README), then restart it.
+      </div>
+      {% endif %}
     {% endif %}
 
     <div id="digest-status" class="digest-status" style="display:none"></div>

@@ -21,7 +21,12 @@
         This Job Agent is invite-only, and that Google account doesn't have an
         account yet. Ask whoever runs it for an invite link.
       {% elif error == 'gmail-not-configured' %}
-        Google sign-in isn't set up on this deployment. Use your private sign-in link.
+        <strong>Gmail isn't set up on this deployment.</strong>
+        Nothing is wrong with your account — the app just has no Google
+        credentials, so it can't connect a mailbox, send digests, or read
+        replies. Whoever runs it needs to add <code>GMAIL_CLIENT_ID</code> and
+        <code>GMAIL_CLIENT_SECRET</code> to the environment and restart.
+        The README has the ~10 minute Google Cloud walkthrough.
       {% elif error == 'oauth-cancelled' %}
         Google sign-in was cancelled.
       {% elif error == 'session-expired' %}
