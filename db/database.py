@@ -17,7 +17,7 @@ _db_path: str | None = None
 # Columns callers are allowed to write. Table names and column names are
 # interpolated into SQL, so they must never come from user input.
 USER_FIELDS = {
-    "name", "email", "gmail_credentials", "resume_text", "linkedin_url",
+    "name", "email", "password_hash", "resume_text", "linkedin_url",
     "phone", "auto_apply", "invite_token", "login_token", "is_owner",
 }
 CRITERIA_FIELDS = {
@@ -76,6 +76,7 @@ def init_db(path: str | None = None):
     # Additive migrations for databases created before these columns existed.
     for table, column, ddl in [
         ("users", "login_token", "ALTER TABLE users ADD COLUMN login_token TEXT"),
+        ("users", "password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT"),
         ("users", "is_owner", "ALTER TABLE users ADD COLUMN is_owner INTEGER DEFAULT 0"),
         ("user_jobs", "digest_batch", "ALTER TABLE user_jobs ADD COLUMN digest_batch TEXT"),
         ("user_jobs", "digest_position", "ALTER TABLE user_jobs ADD COLUMN digest_position INTEGER"),

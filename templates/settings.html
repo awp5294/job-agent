@@ -81,7 +81,7 @@
         <button class="btn-secondary" onclick="copyField('invite-url', this)">Copy</button>
       </div>
       <p class="section-note">
-        They go through onboarding with their own criteria, resume, and Gmail, and
+        They go through onboarding with their own criteria and resume, and
         get their own dashboard. They can't see your jobs and you can't see theirs.
         {% if require_invite %}
         Sign-up requires one of these links, so the URL is safe to leave public.
@@ -93,25 +93,37 @@
     </section>
 
     <section class="settings-section">
-      <h2>Your sign-in</h2>
-      {% if gmail_connected %}
-      <p>Gmail is connected as <strong>{{ user.email }}</strong>. Sign back in any time with Google.</p>
-      {% elif google_available %}
-      <p class="alert-warning">
-        Gmail isn't connected, so no digest emails can be sent yet.
-        <a href="/auth/gmail">Connect Gmail</a>.
+      <h2>Where your digest goes</h2>
+      {% if mail_ready %}
+      <p>
+        Sent to <strong>{{ user.email }}</strong> from
+        <strong>{{ mailbox_address }}</strong>. Reply to that email with job
+        numbers and the agent takes it from there.
       </p>
       {% else %}
       <p class="alert-warning">
-        Gmail isn't set up on this deployment, so nobody can receive a digest or
-        reply to one. Add <code>GMAIL_CLIENT_ID</code> and
-        <code>GMAIL_CLIENT_SECRET</code> to the environment and restart —
-        the README has the Google Cloud walkthrough.
+        Email isn't set up on this deployment, so nobody can receive a digest or
+        reply to one. Set <code>SMTP_USER</code> and <code>SMTP_PASS</code> in the
+        environment and restart.
       </p>
       {% endif %}
+    </section>
 
+    <section class="settings-section">
+      <h2>Change your password</h2>
+      <label>Current password</label>
+      <input type="password" id="current-password" autocomplete="current-password">
+      <label>New password <span class="hint">at least 8 characters</span></label>
+      <input type="password" id="new-password" autocomplete="new-password">
+      <div id="password-message" class="section-note"></div>
+      <button class="btn-secondary" onclick="changePassword()">Update password</button>
+    </section>
+
+    <section class="settings-section">
+      <h2>Emergency sign-in link</h2>
       <p class="section-note">
-        Private sign-in link — keep it secret, anyone with it can open your account:
+        If you forget your password, this link signs you straight in. Keep it
+        secret — anyone with it can open your account.
       </p>
       <div class="invite-row">
         <input type="password" class="invite-input" value="{{ signin_url }}" readonly id="signin-url">
@@ -127,6 +139,24 @@
       btn.textContent = 'Copied!';
       setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
     }
+    async function changePassword() {
+      const box = document.getElementById('password-message');
+      const res = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: document.getElementById('current-password').value,
+          new_password: document.getElementById('new-password').value,
+        }),
+      });
+      const data = await res.json();
+      box.textContent = data.message || (data.ok ? 'Password updated.' : 'Could not update.');
+      if (data.ok) {
+        document.getElementById('current-password').value = '';
+        document.getElementById('new-password').value = '';
+      }
+    }
+
     function revealField(id, btn) {
       const el = document.getElementById(id);
       const hidden = el.type === 'password';

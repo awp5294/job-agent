@@ -55,6 +55,7 @@ ONBOARD_ANSWERS = [
     "Senior",
     "Ada Lovelace. Ten years building analytical engines and shipping "
     "developer platforms end to end, with a focus on data tooling.",
+    "correct-horse-battery",  # password
 ]
 
 
@@ -73,11 +74,12 @@ def walk_onboarding(client, answers=None, email=None):
     return data
 
 
+PASSWORD = ONBOARD_ANSWERS[-1]
+
+
 @pytest.fixture
 def signed_up(client):
     """A signed-in owner account (the first user, so no invite needed)."""
-    walk_onboarding(client)
-    response = client.post("/api/finish-signup")
-    assert response.status_code == 200, response.text
-    assert response.json()["ok"] is True
+    final = walk_onboarding(client)
+    assert final.get("action") == "redirect:/dashboard", final
     return client

@@ -25,15 +25,15 @@ cd job-agent
 python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env — add GEMINI_API_KEY (or ANTHROPIC_API_KEY) and a SECRET_KEY
+# Edit .env — add GEMINI_API_KEY (or ANTHROPIC_API_KEY), SECRET_KEY, SMTP_USER, SMTP_PASS
 uvicorn server:app --reload
 ```
 
 Open http://localhost:8000 — the chat onboarding starts automatically. The first account
 created becomes the owner and doesn't need an invite.
 
-Gmail is optional to get started: without it, matches still appear on your dashboard and
-you sign in with the private link shown at the end of onboarding.
+Email is optional to get started: without a mailbox configured, matches still appear on
+your dashboard — you just don't get the daily digest.
 
 ## Environment Variables
 
@@ -41,10 +41,11 @@ you sign in with the private link shown at the end of onboarding.
 |---|---|---|
 | `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` | Yes | One AI key. Either provider works — see below. |
 | `SECRET_KEY` | Yes | Random string for session signing — `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `BASE_URL` | Yes | Your public URL, e.g. `https://yourapp.railway.app`. Must match the Gmail redirect URI. |
-| `GMAIL_CLIENT_ID` | For email | From Google Cloud Console |
-| `GMAIL_CLIENT_SECRET` | For email | From Google Cloud Console |
-| `SMTP_USER` / `SMTP_PASS` | Fallback | Gmail address + app password, if you'd rather not set up OAuth |
+| `BASE_URL` | Yes | Your public URL, e.g. `https://yourapp.railway.app`. Used for invite links. |
+| `SMTP_USER` / `SMTP_PASS` | For email | The app's own mailbox — a Gmail address and an App Password |
+| `SMTP_HOST` / `SMTP_PORT` | No | Defaults to Gmail (`smtp.gmail.com`, 587) |
+| `IMAP_HOST` / `IMAP_PORT` | No | Where replies are read. Defaults to Gmail. |
+| `MAIL_FROM` | No | Show a different From address than the mailbox login |
 | `REQUIRE_INVITE` | No | Defaults to `1`. Set to `0` to let anyone with the URL sign up. |
 | `LLM_PROVIDER` | No | `anthropic` or `gemini`. Only needed if both keys are set. |
 | `ANTHROPIC_MODEL` / `GEMINI_MODEL` | No | Defaults: `claude-opus-5` / `gemini-2.5-flash` |
@@ -68,23 +69,42 @@ you to set `GEMINI_MODEL` / `ANTHROPIC_MODEL`.
 
 ## How Sign-In Works
 
-There are exactly two ways into an account:
+Email and password. During onboarding each person picks a password; after that
+they sign in at `/signin`. Passwords are hashed with scrypt — the plaintext is
+never stored.
 
-1. **Sign in with Google** — the account is keyed to the email Google reports for the
-   connected mailbox, not to anything typed into the chat. This is the normal path once
-   `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` are configured.
-2. **A private sign-in link** — `/auth/token?t=…`, issued at the end of onboarding when
-   Gmail OAuth isn't configured. Treat it like a password. You can re-copy it any time
-   from Settings.
+Nobody needs a Google account, and nothing has to be approved. Typing someone
+else's email into the onboarding chat does **not** sign you in as them.
 
-Typing someone else's email address into the onboarding chat does **not** sign you in as
-them — it sends you to the sign-in page.
+Each account also gets an emergency sign-in link (`/auth/token?t=…`) on its
+Settings page, for when someone forgets their password. Treat it like a password.
+
+## How Email Works
+
+**The app owns one mailbox. Your friends don't connect anything.**
+
+You set `SMTP_USER` and `SMTP_PASS` once. Every digest is sent from that address
+to whatever email each person entered during onboarding, and every reply comes
+back to that same inbox, where the app matches it to an account by the address it
+came from.
+
+Setting it up for Gmail takes about two minutes:
+
+1. Turn on 2-Step Verification on the Google account you want to send from
+2. Google Account → Security → **App passwords** → generate one
+3. Put the address in `SMTP_USER` and the 16-character App Password in `SMTP_PASS`
+4. Make sure IMAP is enabled (Gmail → Settings → Forwarding and POP/IMAP)
+
+No Google Cloud project, no OAuth consent screen, and nothing for your friends
+to approve. A regular Gmail account can send about 500 emails a day, which is
+plenty for a group of friends on one digest each.
 
 ## Sharing With Friends
 
 1. Go to **Settings** → copy your invite link (`/onboard?invite=…`) → send it to a friend.
-2. They open it, go through onboarding with their own criteria, resume and Gmail, and get
-   their own dashboard.
+2. They open it, answer the chat with their own criteria and resume, pick a password, and
+   get their own dashboard. That's the whole sign-up — no Google account, no approval
+   step, nothing to install.
 3. Everyone gets their own invite link, so they can pass it on.
 
 Sign-up requires an invite link by default (`REQUIRE_INVITE=1`), so the URL is safe to
@@ -92,25 +112,12 @@ leave public — the only exception is the very first account, which bootstraps 
 Each user's jobs, criteria, resume and cover letters are private to them; the API refuses
 any request for a row that belongs to someone else.
 
-## Gmail Setup (one-time, ~10 min)
-
-1. Go to https://console.cloud.google.com and create a project
-2. Enable the **Gmail API** (APIs & Services → Enable APIs)
-3. **Credentials** → Create → OAuth 2.0 Client ID → Web Application
-4. Add `{BASE_URL}/auth/gmail/callback` as an authorized redirect URI
-5. Copy the Client ID and Secret into your `.env`
-6. **OAuth consent screen** → add each user's email as a test user
-
-Scopes requested: `gmail.send` (to send your digest) and `gmail.readonly` (to read your
-replies and confirm your address).
-
 ## Deploy to Railway
 
 1. Push this repo to GitHub
 2. https://railway.app → New Project → Deploy from GitHub → select your repo
 3. Add the environment variables above
 4. Set `BASE_URL` to your Railway URL
-5. Update the Gmail OAuth redirect URI in Google Cloud Console to match
 
 Note: SQLite lives on the container's disk. On a host with an ephemeral filesystem, point
 `DB_PATH` at a mounted volume or your accounts will disappear on redeploy.
@@ -139,9 +146,9 @@ than failing. Greenhouse and Lever are the reliable sources.
    inbox. Anything below the cut stays queued for the next digest.
 3. **You reply** — `1, 3, 5`. Quoted text is ignored, so the digest's own numbers aren't
    read back as selections.
-4. **The agent picks it up within `REPLY_POLL_MINUTES`** (default 15), writes a tailored
-   cover letter for each job you picked, and emails them back with a direct apply link
-   per job.
+4. **The agent reads the reply within `REPLY_POLL_MINUTES`** (default 15) from its own
+   inbox, matches it to your account by your email address, writes a tailored cover
+   letter for each job you picked, and emails them back with a direct apply link.
 5. **You tap the link and submit.** Everything is also on the dashboard if you'd rather
    edit a letter first.
 
@@ -172,12 +179,14 @@ call is stubbed, so no internet access or API key is needed.
 ```
 server.py              FastAPI routes, sessions, onboarding, digest orchestration
 llm.py                 Claude/Gemini client, model config, error handling
+auth.py                Password hashing (scrypt, standard library)
 db/database.py         SQLite data layer (all queries live here)
 db/schema.sql          Schema + additive migrations
 matching/scorer.py     Scores a job against a user's criteria
 apply/cover_letter.py  Cover letter generation + stop-slop filter
 apply/browser.py       Optional Playwright form pre-filler (not used by the web app)
-email_handler/gmail.py OAuth, digest send, reply parsing
+email_handler/mailbox.py  The app's mailbox: SMTP send, IMAP reply reading
+email_handler/digest.py   Email rendering
 sourcing/              Greenhouse, Lever, Indeed
 templates/ static/     UI
 ```

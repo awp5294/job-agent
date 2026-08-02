@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
-    gmail_credentials TEXT,  -- JSON string of OAuth2 credentials
+    password_hash TEXT,            -- scrypt hash; set during onboarding
     resume_text TEXT,
     linkedin_url TEXT,
     phone TEXT,

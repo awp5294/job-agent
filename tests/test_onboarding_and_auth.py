@@ -1,7 +1,7 @@
 """Onboarding, sign-in, and the invite gate."""
 import server
 from db import database
-from tests.conftest import walk_onboarding
+from tests.conftest import ONBOARD_ANSWERS, PASSWORD, walk_onboarding
 
 
 def test_onboard_page_actually_renders_its_body(client):
@@ -17,11 +17,7 @@ def test_onboard_page_actually_renders_its_body(client):
 
 def test_onboarding_creates_account_and_signs_in(client):
     final = walk_onboarding(client)
-    assert final["action"] == "show_finish"
-
-    response = client.post("/api/finish-signup")
-    assert response.json()["ok"] is True
-    assert "/auth/token?t=" in response.json()["signin_url"]
+    assert final["action"] == "redirect:/dashboard"
 
     dashboard = client.get("/dashboard")
     assert dashboard.status_code == 200
@@ -78,8 +74,6 @@ def test_signup_is_blocked_without_an_invite(signed_up, browser):
     response = stranger.post("/api/chat", json={"message": "Stranger"})
     assert "invite-only" in response.json()["reply"]
 
-    # And the API refuses even if they skip the chat and post directly.
-    assert stranger.post("/api/finish-signup").status_code == 403
     assert database.count_users() == 1
 
 
@@ -89,7 +83,6 @@ def test_invite_link_lets_a_friend_sign_up(signed_up, browser):
     friend = browser()
     friend.get(f"/onboard?invite={owner['invite_token']}")
     walk_onboarding(friend, email="grace@example.com")
-    assert friend.post("/api/finish-signup").json()["ok"] is True
 
     assert database.count_users() == 2
     grace = database.get_user_by_email("grace@example.com")
@@ -110,8 +103,8 @@ def test_invite_gate_can_be_turned_off(signed_up, browser, monkeypatch):
     monkeypatch.setattr(server, "REQUIRE_INVITE", False)
     stranger = browser()
     stranger.get("/onboard")
-    walk_onboarding(stranger, email="open@example.com")
-    assert stranger.post("/api/finish-signup").json()["ok"] is True
+    final = walk_onboarding(stranger, email="open@example.com")
+    assert final["action"] == "redirect:/dashboard"
 
 
 def test_signin_link_works_and_a_forged_one_does_not(signed_up, browser):
@@ -139,13 +132,15 @@ def test_duplicate_signup_is_refused(signed_up, browser):
     friend = browser()
     friend.get(f"/onboard?invite={owner['invite_token']}")
 
-    # Reach the finish step with an email nobody has, then take the account.
-    walk_onboarding(friend, email="dupe@example.com")
+    # Answer everything except the password, then have someone take the email.
+    answers = list(ONBOARD_ANSWERS[:-1])
+    answers[1] = "dupe@example.com"
+    walk_onboarding(friend, answers=answers)
     database.create_user("Imposter", "dupe@example.com")
 
-    response = friend.post("/api/finish-signup")
-    assert response.status_code == 409
-    assert "Sign in instead" in response.json()["message"]
+    response = friend.post("/api/chat", json={"message": "another-password"})
+    assert response.json()["action"] == "redirect:/signin"
+    assert "already has an account" in response.json()["reply"]
 
 
 def test_settings_shows_invite_and_signin_links(signed_up):
@@ -182,7 +177,7 @@ def test_resume_upload_accepts_plain_text(client):
         "/api/resume-upload",
         files={"file": ("resume.txt", b"Ten years of product work.", "text/plain")},
     )
-    assert response.json()["action"] == "show_finish"
-    client.post("/api/finish-signup")
+    assert response.json()["action"] == "show_password"
+    client.post("/api/chat", json={"message": "a-good-password"})
     user = database.get_user_by_email("ada@example.com")
     assert "Ten years of product work." in user["resume_text"]

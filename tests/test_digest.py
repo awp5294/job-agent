@@ -5,9 +5,8 @@ import pytest
 
 import server
 from db import database
-from email_handler.gmail import (
-    _build_digest_text, build_digest_message, extract_reply_numbers,
-)
+from email_handler.digest import build_digest_text, digest_subject
+from email_handler.mailbox import build_message, extract_reply_numbers
 
 GREENHOUSE_JOBS = [
     {
@@ -173,8 +172,8 @@ def test_digest_records_source_failures_instead_of_swallowing_them(signed_up, mo
 
 def test_digest_without_email_configured_still_saves_matches(signed_up, stub_sources,
                                                              monkeypatch):
-    """No Gmail, no SMTP: the run should succeed and say why nothing was sent."""
-    monkeypatch.setattr("server.smtp_configured", lambda: False)
+    """No mailbox: the run should succeed and say why nothing was sent."""
+    monkeypatch.setattr(server, "mailbox_configured", lambda: False)
     user = database.get_user_by_email("ada@example.com")
     configure_sources(user["id"])
 
@@ -207,7 +206,6 @@ def test_digest_run_is_scoped_to_one_user(signed_up, browser, stub_sources, sent
     grace_browser = browser()
     grace_browser.get(f"/onboard?invite={ada['invite_token']}")
     walk_onboarding(grace_browser, email="grace@example.com")
-    grace_browser.post("/api/finish-signup")
     grace = database.get_user_by_email("grace@example.com")
 
     configure_sources(ada["id"])
@@ -234,20 +232,23 @@ def test_digest_positions_are_recorded_when_sent(signed_up, stub_sources, sent_e
 
 @pytest.fixture
 def stub_replies(monkeypatch):
-    """Stub the inbox, the cover-letter writer, and the outgoing application email."""
-    state = {"numbers": [], "applications": []}
+    """Stub the shared inbox, the cover-letter writer, and outgoing mail."""
+    state = {"inbox": [], "sent": []}
 
-    monkeypatch.setattr(server, "get_gmail_service", lambda creds: object())
-    monkeypatch.setattr(server, "poll_for_replies",
-                        lambda service, email, n: list(state["numbers"]))
+    monkeypatch.setattr(server, "mailbox_configured", lambda: True)
+    monkeypatch.setattr(server, "fetch_replies", lambda: list(state["inbox"]))
     monkeypatch.setattr(server, "generate_cover_letter",
                         lambda **kw: f"Cover letter for {kw['job_title']}.")
 
-    def fake_application_email(service, to_email, name, items):
-        state["applications"].append({"to": to_email, "items": list(items)})
+    def fake_send(to_email, subject, text, html):
+        state["sent"].append({"to": to_email, "subject": subject, "text": text})
 
-    monkeypatch.setattr(server, "send_application_email", fake_application_email)
+    monkeypatch.setattr(server, "send_email", fake_send)
     return state
+
+
+def reply_from(email: str, body: str) -> dict:
+    return {"from_email": email, "subject": "Re: Your job digest", "body": body}
 
 
 def test_replying_with_numbers_selects_those_jobs(signed_up, stub_sources, sent_emails,
@@ -258,12 +259,9 @@ def test_replying_with_numbers_selects_those_jobs(signed_up, stub_sources, sent_
     configure_sources(user["id"])
     asyncio.run(server.run_digest_for_user(user["id"]))
 
-    database.update_user(user["id"], {"gmail_credentials": '{"token": "fake"}'})
-    stub_replies["numbers"] = [2]
-
-    response = signed_up.post("/api/poll-replies")
-    assert response.status_code == 200
-    assert len(response.json()["selected"]) == 1
+    stub_replies["inbox"] = [reply_from("ada@example.com", "2")]
+    result = asyncio.run(server.poll_all_replies())
+    assert result["selected"] == 1
 
     batch = database.get_latest_digest_batch(user["id"])
     by_position = {j["digest_position"]: j for j in
@@ -278,10 +276,9 @@ def test_reply_writes_the_cover_letter_and_emails_it_back(signed_up, stub_source
     user = database.get_user_by_email("ada@example.com")
     configure_sources(user["id"])
     asyncio.run(server.run_digest_for_user(user["id"]))
-    database.update_user(user["id"], {"gmail_credentials": '{"token": "fake"}'})
 
-    stub_replies["numbers"] = [1, 2]
-    signed_up.post("/api/poll-replies")
+    stub_replies["inbox"] = [reply_from("ada@example.com", "1, 2")]
+    asyncio.run(server.poll_all_replies())
 
     # Both jobs have a letter stored, without anyone opening the dashboard.
     batch = database.get_latest_digest_batch(user["id"])
@@ -290,12 +287,56 @@ def test_reply_writes_the_cover_letter_and_emails_it_back(signed_up, stub_source
         assert stored["status"] == "selected"
         assert stored["cover_letter_text"].startswith("Cover letter for")
 
-    # And one email went back with the letters and the apply links.
-    assert len(stub_replies["applications"]) == 1
-    email = stub_replies["applications"][0]
+    assert len(stub_replies["sent"]) == 1
+    email = stub_replies["sent"][0]
     assert email["to"] == "ada@example.com"
-    assert len(email["items"]) == 2
-    assert all(i["cover_letter"] and i["apply_url"] for i in email["items"])
+    assert "2 cover letters" in email["subject"]
+    assert "https://boards.greenhouse.io" in email["text"]
+
+
+def test_a_reply_is_matched_to_the_person_who_sent_it(signed_up, browser, stub_sources,
+                                                      sent_emails, stub_replies):
+    """One mailbox serves everyone, so the From address decides whose jobs move."""
+    from tests.conftest import walk_onboarding
+
+    ada = database.get_user_by_email("ada@example.com")
+    grace_browser = browser()
+    grace_browser.get(f"/onboard?invite={ada['invite_token']}")
+    walk_onboarding(grace_browser, email="grace@example.com")
+    grace = database.get_user_by_email("grace@example.com")
+
+    for user in (ada, grace):
+        configure_sources(user["id"])
+        asyncio.run(server.run_digest_for_user(user["id"]))
+
+    # Only Grace replies.
+    stub_replies["inbox"] = [reply_from("grace@example.com", "1")]
+    asyncio.run(server.poll_all_replies())
+
+    grace_batch = database.get_latest_digest_batch(grace["id"])
+    grace_jobs = database.get_digest_batch_jobs(grace["id"], grace_batch)
+    assert grace_jobs[0]["status"] == "selected"
+
+    ada_batch = database.get_latest_digest_batch(ada["id"])
+    assert all(j["status"] == "sent"
+               for j in database.get_digest_batch_jobs(ada["id"], ada_batch))
+    assert [m["to"] for m in stub_replies["sent"]] == ["grace@example.com"]
+
+
+def test_mail_from_a_stranger_is_ignored(signed_up, stub_sources, sent_emails,
+                                         stub_replies):
+    user = database.get_user_by_email("ada@example.com")
+    configure_sources(user["id"])
+    asyncio.run(server.run_digest_for_user(user["id"]))
+
+    stub_replies["inbox"] = [reply_from("nobody@spam.example", "1, 2, 3")]
+    result = asyncio.run(server.poll_all_replies())
+
+    assert result["handled"] == 0
+    assert stub_replies["sent"] == []
+    batch = database.get_latest_digest_batch(user["id"])
+    assert all(j["status"] == "sent"
+               for j in database.get_digest_batch_jobs(user["id"], batch))
 
 
 def test_a_failed_cover_letter_still_sends_the_apply_link(signed_up, stub_sources,
@@ -304,70 +345,48 @@ def test_a_failed_cover_letter_still_sends_the_apply_link(signed_up, stub_source
     from llm import LLMError
 
     def boom(**kwargs):
-        raise LLMError("Anthropic is down")
+        raise LLMError("The AI provider is down")
 
     monkeypatch.setattr(server, "generate_cover_letter", boom)
 
     user = database.get_user_by_email("ada@example.com")
     configure_sources(user["id"])
     asyncio.run(server.run_digest_for_user(user["id"]))
-    database.update_user(user["id"], {"gmail_credentials": '{"token": "fake"}'})
 
-    stub_replies["numbers"] = [1]
-    signed_up.post("/api/poll-replies")
+    stub_replies["inbox"] = [reply_from("ada@example.com", "1")]
+    asyncio.run(server.poll_all_replies())
 
-    item = stub_replies["applications"][0]["items"][0]
-    assert item["cover_letter"] == ""
-    assert item["apply_url"]
-    assert "Anthropic is down" in item["note"]
+    sent = stub_replies["sent"][0]["text"]
+    assert "https://" in sent
+    assert "The AI provider is down" in sent
 
 
 def test_no_reply_means_no_email(signed_up, stub_sources, sent_emails, stub_replies):
     user = database.get_user_by_email("ada@example.com")
     configure_sources(user["id"])
     asyncio.run(server.run_digest_for_user(user["id"]))
-    database.update_user(user["id"], {"gmail_credentials": '{"token": "fake"}'})
 
-    stub_replies["numbers"] = []
-    signed_up.post("/api/poll-replies")
-    assert stub_replies["applications"] == []
-
-
-def test_scheduled_poll_covers_every_user_with_gmail(signed_up, browser, stub_sources,
-                                                     sent_emails, stub_replies):
-    """Regression: nothing polled for replies, so replying did nothing on its own."""
-    from tests.conftest import walk_onboarding
-
-    ada = database.get_user_by_email("ada@example.com")
-    grace_browser = browser()
-    grace_browser.get(f"/onboard?invite={ada['invite_token']}")
-    walk_onboarding(grace_browser, email="grace@example.com")
-    grace_browser.post("/api/finish-signup")
-    grace = database.get_user_by_email("grace@example.com")
-
-    for user in (ada, grace):
-        configure_sources(user["id"])
-        asyncio.run(server.run_digest_for_user(user["id"]))
-        database.update_user(user["id"], {"gmail_credentials": '{"token": "fake"}'})
-
-    stub_replies["numbers"] = [1]
+    stub_replies["inbox"] = []
     asyncio.run(server.poll_all_replies())
-
-    # Both inboxes were processed by the scheduled job.
-    assert {a["to"] for a in stub_replies["applications"]} == {
-        "ada@example.com", "grace@example.com"
-    }
+    assert stub_replies["sent"] == []
 
 
-def test_scheduled_poll_skips_users_without_gmail(signed_up, stub_sources, sent_emails,
-                                                  stub_replies):
+def test_a_reply_with_no_numbers_does_nothing(signed_up, stub_sources, sent_emails,
+                                              stub_replies):
     user = database.get_user_by_email("ada@example.com")
     configure_sources(user["id"])
     asyncio.run(server.run_digest_for_user(user["id"]))
-    # No gmail_credentials set.
-    stub_replies["numbers"] = [1]
+
+    stub_replies["inbox"] = [reply_from("ada@example.com", "thanks, none for me")]
     asyncio.run(server.poll_all_replies())
-    assert stub_replies["applications"] == []
+    assert stub_replies["sent"] == []
+
+
+def test_polling_without_a_mailbox_is_a_clear_no_op(signed_up, monkeypatch):
+    monkeypatch.setattr(server, "mailbox_configured", lambda: False)
+    result = asyncio.run(server.poll_all_replies())
+    assert result["ok"] is False
+    assert "No mailbox" in result["message"]
 
 
 def test_polling_twice_does_not_undo_later_work(signed_up, stub_sources, sent_emails,
@@ -376,15 +395,14 @@ def test_polling_twice_does_not_undo_later_work(signed_up, stub_sources, sent_em
     configure_sources(user["id"])
     asyncio.run(server.run_digest_for_user(user["id"]))
 
-    database.update_user(user["id"], {"gmail_credentials": '{"token": "fake"}'})
-    stub_replies["numbers"] = [1]
+    stub_replies["inbox"] = [reply_from("ada@example.com", "1")]
+    asyncio.run(server.poll_all_replies())
 
-    signed_up.post("/api/poll-replies")
     batch = database.get_latest_digest_batch(user["id"])
     uj = database.get_digest_batch_jobs(user["id"], batch)[0]
     database.update_user_job(uj["id"], {"status": "applied"})
 
-    signed_up.post("/api/poll-replies")
+    asyncio.run(server.poll_all_replies())
     assert database.get_user_job(uj["id"])["status"] == "applied"
 
 
@@ -411,11 +429,12 @@ def test_digest_email_numbers_jobs_in_order():
         {"title": "Senior PM", "company": "Figma", "location": "Remote",
          "score": 88, "score_reason": "Also good.", "apply_url": "https://x/2"},
     ]
-    text = _build_digest_text("Ada", jobs)
+    text = build_digest_text("Ada", jobs)
     assert "1. Staff PM @ Stripe" in text
     assert "2. Senior PM @ Figma" in text
 
-    message = build_digest_message("ada@example.com", "Ada", jobs)
+    message = build_message("ada@example.com", digest_subject(jobs),
+                            text, "<html></html>")
     assert "2 matches" in message["Subject"]
     assert message["To"] == "ada@example.com"
     assert {part.get_content_type() for part in message.get_payload()} == {

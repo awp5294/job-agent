@@ -4,19 +4,19 @@ Routes, session management, the onboarding chat, and the JSON API.
 
 Sign-in model
 -------------
-An account is only ever attached to a browser session by a path that has
-actually proven identity:
+Email and password. An account is only attached to a browser session by a path
+that has actually proven identity — a correct password, or a personal sign-in
+link containing a per-user secret. Typing a known email address into the
+onboarding chat does NOT sign you in.
 
-  * Google OAuth — the account's email comes from Google's profile endpoint,
-    not from anything typed into the chat. This is the normal path.
-  * A personal sign-in link — a per-user secret token, used when Gmail OAuth
-    isn't configured (local development, or a deployment that only sends over
-    SMTP).
-
-Typing a known email address into the onboarding chat does NOT sign you in.
+Email model
+-----------
+The app owns one mailbox (SMTP_USER / SMTP_PASS). Every digest is sent from it
+to whatever address the user gave during onboarding, and every reply comes back
+to it, matched to a user by the address it came from. Users do not connect their
+own mail account.
 """
 import asyncio
-import json
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -42,9 +42,14 @@ from db.database import (
     set_session_state, start_digest_run, update_criteria, update_user,
     update_user_job, upsert_job, upsert_user_job,
 )
-from email_handler.gmail import (
-    get_gmail_service, get_oauth_flow, get_verified_email, oauth_configured,
-    poll_for_replies, send_application_email, send_digest_email, smtp_configured,
+from auth import PasswordError, hash_password, verify_password
+from email_handler.digest import (
+    application_subject, build_application_html, build_application_text,
+    build_digest_html, build_digest_text, digest_subject,
+)
+from email_handler.mailbox import (
+    MailboxError, extract_reply_numbers, fetch_replies, mailbox_address,
+    mailbox_configured, send_email,
 )
 from llm import LLMError
 from llm import describe as llm_describe
@@ -99,21 +104,16 @@ def startup_report() -> list[str]:
             "SECRET_KEY is still the default — anyone could forge a login. "
             "Set it to a random string."
         )
-    if not oauth_configured():
-        if smtp_configured():
-            problems.append(
-                "Gmail isn't configured, so digests go out over SMTP and replies "
-                "can't be read. The reply-to-apply flow needs Gmail."
-            )
-        else:
-            problems.append(
-                "No email configured (neither Gmail nor SMTP) — matches will only "
-                "appear on the dashboard, and no digests will be sent."
-            )
+    if not mailbox_configured():
+        problems.append(
+            "No mailbox configured — set SMTP_USER and SMTP_PASS (a Gmail "
+            "address and an App Password). Without it nobody receives a digest "
+            "and replies can't be read; matches only appear on the dashboard."
+        )
     if BASE_URL.startswith("http://localhost") or BASE_URL.startswith("http://127."):
         problems.append(
-            f"BASE_URL is {BASE_URL} — fine locally, but invite links and Google "
-            "sign-in will be broken if this is a real deployment."
+            f"BASE_URL is {BASE_URL} — fine locally, but invite links will be "
+            "broken if this is a real deployment."
         )
     return problems
 
@@ -129,9 +129,9 @@ async def lifespan(app: FastAPI):
             print(f"   - {problem}")
         print()
     else:
-        print(f"\n  Job Agent ready. AI: {llm_describe()}. Digests at "
-              f"{DIGEST_HOUR:02d}:00 {TIMEZONE}, replies checked every "
-              f"{REPLY_POLL_MINUTES} min.\n")
+        print(f"\n  Job Agent ready. AI: {llm_describe()}. Mail: "
+              f"{mailbox_address()}. Digests at {DIGEST_HOUR:02d}:00 {TIMEZONE}, "
+              f"replies checked every {REPLY_POLL_MINUTES} min.\n")
 
     if ENABLE_SCHEDULER:
         scheduler.add_job(run_all_digests, "cron", hour=DIGEST_HOUR, minute=0)
@@ -231,14 +231,14 @@ async def root(request: Request):
 
 ONBOARD_STEPS = [
     {"key": "name",        "prompt": "Hi! I'm your job agent. What's your name?"},
-    {"key": "email",       "prompt": "Nice to meet you, {name}! What's your email address?"},
+    {"key": "email",       "prompt": "Nice to meet you, {name}! What email should I send your job digest to?"},
     {"key": "job_titles",  "prompt": "What job titles are you looking for? (e.g. Product Manager, Senior PM)"},
     {"key": "locations",   "prompt": "Where would you like to work? List cities, or type 'remote' for remote-only."},
     {"key": "remote_pref", "prompt": "Remote preference — any / remote / hybrid / onsite?"},
     {"key": "salary",      "prompt": "What's your salary range? (e.g. $120k-$160k, or skip)"},
     {"key": "seniority",   "prompt": "Seniority levels? (e.g. Senior, Staff, Lead — or skip)"},
     {"key": "resume",      "prompt": "Upload your resume (PDF) or paste the text below so I can tailor cover letters."},
-    {"key": "finish",      "prompt": "Last step — connect your Gmail so I can send your daily digest and read your replies."},
+    {"key": "password",    "prompt": "Last step — pick a password so you can sign back in later (at least 8 characters)."},
 ]
 TOTAL_STEPS = len(ONBOARD_STEPS)
 
@@ -261,7 +261,7 @@ async def onboard_page(request: Request, invite: Optional[str] = None):
         {
             "total_steps": TOTAL_STEPS,
             "first_prompt": ONBOARD_STEPS[0]["prompt"],
-            "google_available": oauth_configured(),
+            "mail_ready": mailbox_configured(),
             "signup_blocked": None if allowed else reason,
         },
     )
@@ -283,7 +283,7 @@ async def signin_page(request: Request, error: Optional[str] = None):
         request,
         "signin.html",
         {
-            "google_available": oauth_configured(),
+            "mail_ready": mailbox_configured(),
             "error": error,
         },
     )
@@ -338,6 +338,12 @@ def _parse_step(key: str, message: str, data: dict) -> str | None:
         if len(message.strip()) > 50:
             data["resume_text"] = message.strip()[:8000]
 
+    elif key == "password":
+        try:
+            data["password_hash"] = hash_password(message)
+        except PasswordError as exc:
+            return str(exc)
+
     return None
 
 
@@ -375,7 +381,7 @@ async def chat(request: Request):
     step_num = state.get("step_num", 0)
     data = state.setdefault("data", {})
 
-    if step_num >= len(ONBOARD_STEPS) - 1:
+    if step_num >= len(ONBOARD_STEPS):
         return _chat_reply(sid, "You're all set — head to your dashboard.", step_num,
                            "redirect:/dashboard")
 
@@ -403,7 +409,46 @@ async def chat(request: Request):
     state["data"] = data
     set_session_state(sid, state)
 
+    # Answering the last question is the sign-up.
+    if step["key"] == "password":
+        return _create_account(sid, state)
+
     return _chat_reply(sid, *_next_prompt(state))
+
+
+def _create_account(sid: str, state: dict):
+    """Final onboarding step: make the account and sign the browser in."""
+    data = state.get("data", {})
+
+    allowed, reason = signup_check(state)
+    if not allowed:
+        return _chat_reply(sid, reason, state["step_num"])
+    if not data.get("email") or not data.get("password_hash"):
+        return _chat_reply(
+            sid, "Something went missing — let's start over.", 0, "redirect:/onboard"
+        )
+    if get_user_by_email(data["email"]):
+        return _chat_reply(
+            sid,
+            "That email already has an account. Taking you to sign in...",
+            state["step_num"], "redirect:/signin",
+        )
+
+    user_id = create_account_from_state(state, data["email"])
+    update_user(user_id, {"password_hash": data["password_hash"]})
+
+    where = (
+        f"I'll email your first digest to {data['email']}."
+        if mailbox_configured() else
+        "Heads up: email isn't set up on this deployment yet, so your matches "
+        "will only appear on your dashboard for now."
+    )
+    response = _chat_reply(
+        sid, f"You're all set. {where} Taking you to your dashboard...",
+        state["step_num"], "redirect:/dashboard",
+    )
+    sign_in(response, sid, user_id)
+    return response
 
 
 def _next_prompt(state: dict) -> tuple[str, int, str | None]:
@@ -412,18 +457,9 @@ def _next_prompt(state: dict) -> tuple[str, int, str | None]:
     step = ONBOARD_STEPS[step_num]
     if step["key"] == "resume":
         return step["prompt"], step_num, "show_resume_upload"
-    if step["key"] == "finish":
-        return _finish_prompt(), step_num, "show_finish"
+    if step["key"] == "password":
+        return step["prompt"], step_num, "show_password"
     return step["prompt"].format(**state.get("data", {})), step_num, None
-
-
-def _finish_prompt() -> str:
-    if oauth_configured():
-        return ONBOARD_STEPS[-1]["prompt"]
-    return (
-        "Last step — Gmail isn't configured on this deployment, so I'll set up "
-        "your account now and give you a private sign-in link to bookmark."
-    )
 
 
 @app.post("/api/resume-upload")
@@ -449,101 +485,52 @@ async def resume_upload(request: Request, file: UploadFile = File(...)):
     state["data"] = data
     set_session_state(sid, state)
 
-    return _chat_reply(sid, f"Got it — {len(text.split())} words. {_finish_prompt()}",
-                       state["step_num"], "show_finish")
+    return _chat_reply(
+        sid,
+        f"Got it — {len(text.split())} words. {ONBOARD_STEPS[-1]['prompt']}",
+        state["step_num"], "show_password",
+    )
 
 
-@app.post("/api/finish-signup")
-async def finish_signup(request: Request):
-    """Create the account without Gmail (used when OAuth isn't configured)."""
+# ── Sign in ────────────────────────────────────────────────────────────────
+
+@app.post("/api/signin")
+async def api_signin(request: Request):
+    """Email + password. Deliberately vague about which half was wrong."""
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+
+    user = get_user_by_email(email) if email else None
+    if not user or not verify_password(password, user.get("password_hash")):
+        return JSONResponse(
+            {"ok": False, "message": "That email and password don't match an account."},
+            status_code=401,
+        )
+
     sid = ensure_session(request)
-    state = get_session_state(sid)
-    data = state.get("data", {})
-
-    allowed, reason = signup_check(state)
-    if not allowed:
-        return JSONResponse({"ok": False, "message": reason}, status_code=403)
-    if not data.get("email"):
-        return JSONResponse(
-            {"ok": False, "message": "Finish the chat first — I still need your email."},
-            status_code=400,
-        )
-    if get_user_by_email(data["email"]):
-        return JSONResponse(
-            {"ok": False, "message": "That email already has an account. Sign in instead."},
-            status_code=409,
-        )
-
-    user_id = create_account_from_state(state, data["email"])
-    user = get_user(user_id)
-    response = JSONResponse({
-        "ok": True,
-        "signin_url": f"{BASE_URL}/auth/token?t={user['login_token']}",
-    })
-    sign_in(response, sid, user_id)
+    response = JSONResponse({"ok": True})
+    sign_in(response, sid, user["id"])
     return response
 
 
-# ── Gmail OAuth (also the sign-in path) ────────────────────────────────────
+@app.post("/api/change-password")
+async def api_change_password(request: Request):
+    user = require_user(request)
+    body = await request.json()
 
-@app.get("/auth/gmail")
-async def auth_gmail(request: Request):
-    if not oauth_configured():
-        return RedirectResponse("/signin?error=gmail-not-configured")
-    sid = ensure_session(request)
-    flow = get_oauth_flow(f"{BASE_URL}/auth/gmail/callback", state=sid)
-    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
-    response = RedirectResponse(auth_url)
-    set_session_cookie(response, sid)
-    return response
-
-
-@app.get("/auth/gmail/callback")
-async def auth_gmail_callback(request: Request, code: str = "", state: str = ""):
-    if not code:
-        return RedirectResponse("/signin?error=oauth-cancelled")
-
-    sid = state or read_session_id(request)
-    if not sid:
-        return RedirectResponse("/signin?error=session-expired")
-    create_session(sid)
-
-    flow = get_oauth_flow(f"{BASE_URL}/auth/gmail/callback", state=sid)
+    if not verify_password(body.get("current_password") or "", user.get("password_hash")):
+        return JSONResponse(
+            {"ok": False, "message": "Your current password isn't right."},
+            status_code=403,
+        )
     try:
-        flow.fetch_token(code=code)
-        creds = flow.credentials
-        gmail_creds = {
-            "token": creds.token,
-            "refresh_token": creds.refresh_token,
-            "token_uri": creds.token_uri,
-            "client_id": creds.client_id,
-            "client_secret": creds.client_secret,
-            "scopes": list(creds.scopes or []),
-        }
-        verified_email = get_verified_email(get_gmail_service(gmail_creds))
-    except Exception as exc:
-        print(f"[oauth] failed: {exc}")
-        return RedirectResponse("/signin?error=oauth-failed")
+        new_hash = hash_password(body.get("new_password") or "")
+    except PasswordError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
 
-    if not verified_email:
-        return RedirectResponse("/signin?error=no-email")
-
-    # Google told us who this is. Existing account => sign in. New => sign up,
-    # subject to the invite check.
-    user = get_user_by_email(verified_email)
-    if user:
-        user_id = user["id"]
-    else:
-        session_state = get_session_state(sid)
-        allowed, _ = signup_check(session_state)
-        if not allowed:
-            return RedirectResponse("/signin?error=invite-required")
-        user_id = create_account_from_state(session_state, verified_email)
-
-    update_user(user_id, {"gmail_credentials": json.dumps(gmail_creds)})
-    response = RedirectResponse("/dashboard")
-    sign_in(response, sid, user_id)
-    return response
+    update_user(user["id"], {"password_hash": new_hash})
+    return JSONResponse({"ok": True, "message": "Password updated."})
 
 
 @app.get("/auth/token")
@@ -580,8 +567,7 @@ async def dashboard(request: Request):
         "dashboard.html",
         {
             "user": user,
-            "gmail_connected": bool(user.get("gmail_credentials")),
-            "google_available": oauth_configured(),
+            "mail_ready": mailbox_configured(),
         },
     )
 
@@ -599,9 +585,9 @@ async def settings_get(request: Request):
             "criteria": get_criteria(user["id"]) or {},
             "invite_url": f"{BASE_URL}/onboard?invite={user['invite_token']}",
             "signin_url": f"{BASE_URL}/auth/token?t={user['login_token']}",
+            "mailbox_address": mailbox_address(),
             "require_invite": REQUIRE_INVITE,
-            "gmail_connected": bool(user.get("gmail_credentials")),
-            "google_available": oauth_configured(),
+            "mail_ready": mailbox_configured(),
         },
     )
 
@@ -828,17 +814,18 @@ async def run_digest_for_user(user_id: int) -> dict:
 
 def _send_digest(user: dict, jobs: list[dict]) -> tuple[bool, str]:
     """Returns (sent, note). Never raises — a send failure isn't fatal."""
-    service = None
-    if user.get("gmail_credentials"):
-        try:
-            service = get_gmail_service(json.loads(user["gmail_credentials"]))
-        except Exception as exc:
-            return False, f"gmail auth: {exc}"
-    if service is None and not smtp_configured():
+    if not mailbox_configured():
         return False, "email not configured — matches are on your dashboard instead"
     try:
-        send_digest_email(service, user["email"], user["name"], jobs)
+        send_email(
+            user["email"],
+            digest_subject(jobs),
+            build_digest_text(user["name"], jobs),
+            build_digest_html(user["name"], jobs),
+        )
         return True, ""
+    except MailboxError as exc:
+        return False, str(exc)
     except Exception as exc:
         return False, f"email send: {exc}"
 
@@ -856,27 +843,20 @@ async def run_all_digests():
 # agent takes it from there, so this runs on a schedule — not only when someone
 # happens to have the dashboard open.
 
-async def poll_replies_for_user(user_id: int) -> dict:
-    """Read replies, then write a cover letter for each chosen job and send it back."""
-    user = get_user(user_id)
-    if not user or not user.get("gmail_credentials"):
-        return {"ok": False, "message": "No Gmail connected", "selected": []}
+async def apply_reply(user: dict, numbers: list[int]) -> dict:
+    """Act on the numbers one person replied with.
 
+    Selects each job, writes its cover letter, and emails the letters back with
+    apply links.
+    """
+    user_id = user["id"]
     batch = get_latest_digest_batch(user_id)
     if not batch:
-        return {"ok": True, "message": "No digest sent yet", "selected": []}
+        return {"selected": [], "message": "No digest sent yet"}
 
-    sent_jobs = get_digest_batch_jobs(user_id, batch)
-    by_position = {uj["digest_position"]: uj for uj in sent_jobs}
-
-    try:
-        service = get_gmail_service(json.loads(user["gmail_credentials"]))
-        numbers = await asyncio.to_thread(
-            poll_for_replies, service, user["email"], len(sent_jobs)
-        )
-    except Exception as exc:
-        return {"ok": False, "message": f"Could not read replies: {exc}", "selected": []}
-
+    by_position = {
+        uj["digest_position"]: uj for uj in get_digest_batch_jobs(user_id, batch)
+    }
     criteria = get_criteria(user_id) or {}
     selected, prepared = [], []
 
@@ -921,27 +901,62 @@ async def poll_replies_for_user(user_id: int) -> dict:
     if prepared:
         try:
             await asyncio.to_thread(
-                send_application_email, service, user["email"], user["name"], prepared
+                send_email,
+                user["email"],
+                application_subject(prepared),
+                build_application_text(user["name"], prepared),
+                build_application_html(user["name"], prepared),
             )
         except Exception as exc:
-            print(f"[replies] user {user_id}: could not send the application email: {exc}")
+            print(f"[replies] user {user_id}: could not send the letters: {exc}")
 
-    return {"ok": True, "selected": selected, "prepared": len(prepared)}
+    return {"selected": selected, "prepared": len(prepared)}
+
+
+async def poll_all_replies() -> dict:
+    """Read the app mailbox and route each reply to the account that sent it.
+
+    One inbox for everyone: a reply is matched to a user by its From address,
+    so nobody has to connect their own mail account.
+    """
+    if not mailbox_configured():
+        return {"ok": False, "message": "No mailbox configured", "handled": 0}
+
+    try:
+        replies = await asyncio.to_thread(fetch_replies)
+    except MailboxError as exc:
+        print(f"[replies] {exc}")
+        return {"ok": False, "message": str(exc), "handled": 0}
+
+    handled, selected_total = 0, 0
+    for reply in replies:
+        user = get_user_by_email(reply["from_email"])
+        if not user:
+            print(f"[replies] ignoring mail from unknown address {reply['from_email']!r}")
+            continue
+
+        batch = get_latest_digest_batch(user["id"])
+        sent_count = len(get_digest_batch_jobs(user["id"], batch)) if batch else 0
+        if not sent_count:
+            continue
+
+        numbers = extract_reply_numbers(reply["body"], sent_count)
+        if not numbers:
+            continue
+
+        try:
+            result = await apply_reply(user, numbers)
+        except Exception as exc:
+            print(f"[replies] user {user['id']} failed: {exc}")
+            continue
+        handled += 1
+        selected_total += len(result["selected"])
+
+    return {"ok": True, "handled": handled, "selected": selected_total}
 
 
 @app.post("/api/poll-replies")
 async def api_poll_replies(request: Request):
-    user = require_user(request)
-    result = await poll_replies_for_user(user["id"])
-    return JSONResponse(result)
-
-
-async def poll_all_replies():
-    """Every REPLY_POLL_MINUTES: check everyone's inbox for digest replies."""
-    for user in get_all_users():
-        if not user.get("gmail_credentials"):
-            continue
-        try:
-            await poll_replies_for_user(user["id"])
-        except Exception as exc:
-            print(f"[replies] user {user['id']} failed: {exc}")
+    """Check for replies now, rather than waiting for the next scheduled run."""
+    require_user(request)
+    return JSONResponse(await poll_all_replies())
