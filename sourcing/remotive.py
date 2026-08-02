@@ -7,9 +7,11 @@ onboarding alone. Remote roles only.
 
 Public API, no key, no scraping: https://remotive.com/api/remote-jobs
 """
+import os
+
 import httpx
 
-BASE = "https://remotive.com/api/remote-jobs"
+BASE = os.getenv("REMOTIVE_API_BASE", "https://remotive.com/api/remote-jobs")
 MAX_TITLES = 3
 PER_TITLE = 25
 

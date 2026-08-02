@@ -1,11 +1,14 @@
 """What the digest email actually looks like, and how replies to it are read."""
+import inspect
+
 import pytest
 
 from email_handler.digest import (
-    application_subject, build_application_html, build_application_text,
-    build_digest_html, build_digest_text, digest_subject, plural, summarise,
+    DIGEST_SUBJECT_MARKER, application_subject, build_application_html,
+    build_application_text, build_digest_html, build_digest_text,
+    digest_subject, plural, summarise,
 )
-from email_handler.mailbox import extract_reply_numbers
+from email_handler.mailbox import extract_reply_numbers, fetch_replies
 
 JOBS = [
     {
@@ -213,3 +216,28 @@ def test_none_wins_over_a_stray_number():
 
 def test_all_does_not_fire_on_an_unrelated_word():
     assert extract_reply_numbers("finally, 2 please", max_number=5) == [2]
+
+
+# ── Subject and reply filter must not drift apart ──────────────────────────
+# These stayed in sync by luck once, then didn't, and every reply was silently
+# skipped: the poller reported "handled: 0" and no one could tell why. The
+# tests below fail loudly the moment either side moves.
+
+@pytest.mark.parametrize("count", [1, 2, 3, 10, 25])
+def test_every_digest_subject_carries_the_reply_marker(count):
+    subject = digest_subject([{}] * count)
+    assert DIGEST_SUBJECT_MARKER.lower() in subject.lower()
+
+
+def test_the_reply_filter_defaults_to_the_marker():
+    """fetch_replies keeps unread anything whose subject misses this string."""
+    default = inspect.signature(fetch_replies).parameters["subject_contains"].default
+    assert default == DIGEST_SUBJECT_MARKER
+
+
+@pytest.mark.parametrize("count", [1, 2, 10])
+def test_a_real_reply_subject_passes_the_real_filter(count):
+    """Reply-To subjects arrive prefixed. Both sides, end to end, no mocks."""
+    reply_subject = "Re: " + digest_subject([{}] * count)
+    default = inspect.signature(fetch_replies).parameters["subject_contains"].default
+    assert default.lower() in reply_subject.lower()

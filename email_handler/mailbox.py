@@ -19,6 +19,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import parseaddr
 
+from email_handler.digest import DIGEST_SUBJECT_MARKER
+
 
 class MailboxError(RuntimeError):
     """Sending or receiving failed. The message is safe to show a user."""
@@ -68,6 +70,28 @@ def build_message(to_email: str, subject: str, text: str, html: str) -> MIMEMult
     return message
 
 
+def _connect_smtp(settings: dict):
+    """Open an SMTP connection, encrypted whichever way the server does it.
+
+    Port 465 means implicit TLS; everything else means plain connect then
+    STARTTLS. Some servers offer neither, so only upgrade when the server says
+    it can — calling starttls() blindly fails the send outright.
+    """
+    if settings["port"] == 465:
+        return smtplib.SMTP_SSL(settings["host"], settings["port"], timeout=30)
+
+    smtp = smtplib.SMTP(settings["host"], settings["port"], timeout=30)
+    try:
+        smtp.ehlo()
+        if smtp.has_extn("starttls"):
+            smtp.starttls()
+            smtp.ehlo()
+    except Exception:
+        smtp.close()
+        raise
+    return smtp
+
+
 def send_email(to_email: str, subject: str, text: str, html: str) -> None:
     if not mailbox_configured():
         raise MailboxError(
@@ -77,8 +101,7 @@ def send_email(to_email: str, subject: str, text: str, html: str) -> None:
     settings = smtp_settings()
     message = build_message(to_email, subject, text, html)
     try:
-        with smtplib.SMTP(settings["host"], settings["port"], timeout=30) as smtp:
-            smtp.starttls()
+        with _connect_smtp(settings) as smtp:
             smtp.login(settings["user"], settings["password"])
             smtp.sendmail(settings["from"], [to_email], message.as_string())
     except smtplib.SMTPAuthenticationError as exc:
@@ -151,7 +174,7 @@ def extract_reply_numbers(body: str, max_number: int) -> list[int]:
     return sorted(n for n in numbers if 1 <= n <= max_number)
 
 
-def fetch_replies(subject_contains: str = "job digest") -> list[dict]:
+def fetch_replies(subject_contains: str = DIGEST_SUBJECT_MARKER) -> list[dict]:
     """Unread replies to a digest, as {from_email, subject, body}.
 
     Messages are marked read once returned, so a reply is only ever acted on

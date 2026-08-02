@@ -2,9 +2,13 @@
 
 Sourcers only fetch and normalise — the server decides what to store.
 """
+import os
+
 import httpx
 
-BASE = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+# Overridable so you can point at a proxy or a stand-in during testing.
+BASE = os.getenv("GREENHOUSE_API_BASE",
+                 "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
 
 
 def parse_job(job: dict, company_slug: str) -> dict:

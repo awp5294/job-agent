@@ -8,6 +8,12 @@ from datetime import datetime
 from html import unescape
 
 
+# Every digest subject contains this, and replies are matched on it. Keep the
+# two together: when they drifted apart, replies stopped being read at all and
+# nothing said so.
+DIGEST_SUBJECT_MARKER = "job match"
+
+
 def plural(count: int, word: str) -> str:
     """Count plus the word, pluralised. Handles "job match" -> "job matches"."""
     if count == 1:
@@ -17,7 +23,8 @@ def plural(count: int, word: str) -> str:
 
 
 def digest_subject(jobs: list) -> str:
-    return f"{plural(len(jobs), 'job match')} for you, {datetime.now().strftime('%b %d')}"
+    return (f"{plural(len(jobs), DIGEST_SUBJECT_MARKER)} for you, "
+            f"{datetime.now().strftime('%b %d')}")
 
 
 def application_subject(items: list) -> str:
