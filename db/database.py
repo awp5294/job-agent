@@ -1,13 +1,18 @@
-"""SQLite data layer.
+"""Data layer, over SQLite locally and Postgres when DATABASE_URL is set.
 
 Every function opens a short-lived connection. That's fine at this scale and keeps
 things safe across the threadpool that FastAPI uses for sync work.
+
+The SQL here is written in SQLite's dialect; db/connection.py translates it when
+Postgres is the backend. See that module for what differs.
 """
 import json
 import os
-import sqlite3
 import uuid
+from datetime import date, datetime
 from pathlib import Path
+
+from db.connection import connect
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
@@ -52,11 +57,21 @@ def db_path() -> str:
 
 
 def get_conn():
-    conn = sqlite3.connect(db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    return connect(db_path())
+
+
+def as_dict(row) -> dict:
+    """A row as a plain dict, with timestamps as strings on either backend.
+
+    SQLite hands back TIMESTAMP columns as text; Postgres hands back datetime
+    objects. Callers json.dumps these straight into responses, so without this
+    the same endpoint works on SQLite and 500s on Postgres.
+    """
+    out = dict(row)
+    for key, value in out.items():
+        if isinstance(value, (datetime, date)):
+            out[key] = value.isoformat(sep=" ", timespec="seconds")
+    return out
 
 
 def _filter(kwargs: dict, allowed: set, what: str) -> dict:
@@ -81,8 +96,7 @@ def init_db(path: str | None = None):
         ("user_jobs", "digest_batch", "ALTER TABLE user_jobs ADD COLUMN digest_batch TEXT"),
         ("user_jobs", "digest_position", "ALTER TABLE user_jobs ADD COLUMN digest_position INTEGER"),
     ]:
-        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
-        if column not in existing:
+        if column not in conn.columns(table):
             conn.execute(ddl)
 
     conn.commit()
@@ -93,13 +107,14 @@ def init_db(path: str | None = None):
 
 def create_user(name: str, email: str, invite_token: str | None = None) -> int:
     conn = get_conn()
-    is_owner = 1 if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0 else 0
+    existing = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
     cur = conn.execute(
         """INSERT INTO users (name, email, invite_token, login_token, is_owner)
-           VALUES (?, ?, ?, ?, ?)""",
-        (name, email, invite_token or str(uuid.uuid4()), str(uuid.uuid4()), is_owner),
+           VALUES (?, ?, ?, ?, ?) RETURNING id""",
+        (name, email, invite_token or str(uuid.uuid4()), str(uuid.uuid4()),
+         1 if existing == 0 else 0),
     )
-    user_id = cur.lastrowid
+    user_id = cur.fetchone()["id"]
     conn.execute("INSERT INTO user_criteria (user_id) VALUES (?)", (user_id,))
     conn.commit()
     conn.close()
@@ -110,7 +125,7 @@ def _one(sql: str, params: tuple) -> dict | None:
     conn = get_conn()
     row = conn.execute(sql, params).fetchone()
     conn.close()
-    return dict(row) if row else None
+    return as_dict(row) if row else None
 
 
 def get_user(user_id: int) -> dict | None:
@@ -137,12 +152,12 @@ def get_all_users() -> list[dict]:
     conn = get_conn()
     rows = conn.execute("SELECT * FROM users ORDER BY id").fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [as_dict(r) for r in rows]
 
 
 def count_users() -> int:
     conn = get_conn()
-    n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    n = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
     conn.close()
     return n
 
@@ -208,7 +223,8 @@ def get_session_state(session_id: str) -> dict:
 def create_session(session_id: str):
     conn = get_conn()
     conn.execute(
-        "INSERT OR IGNORE INTO sessions (id, state) VALUES (?, '{}')", (session_id,)
+        "INSERT INTO sessions (id, state) VALUES (?, '{}') "
+        "ON CONFLICT (id) DO NOTHING", (session_id,)
     )
     conn.commit()
     conn.close()
@@ -274,7 +290,7 @@ def upsert_job(source: str, external_id: str, title: str, company: str,
     )
     job_id = conn.execute(
         "SELECT id FROM jobs WHERE source=? AND external_id=?", (source, external_id)
-    ).fetchone()[0]
+    ).fetchone()["id"]
     conn.commit()
     conn.close()
     return job_id
@@ -294,7 +310,7 @@ def get_user_jobs(user_id: int, status: str | None = None) -> list[dict]:
     conn = get_conn()
     rows = conn.execute(sql, params).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [as_dict(r) for r in rows]
 
 
 def upsert_user_job(user_id: int, job_id: int, score: int, score_reason: str):
@@ -373,7 +389,7 @@ def get_latest_digest_batch(user_id: int) -> str | None:
         (user_id,),
     ).fetchone()
     conn.close()
-    return row[0] if row else None
+    return row["digest_batch"] if row else None
 
 
 def get_digest_batch_jobs(user_id: int, batch: str) -> list[dict]:
@@ -386,15 +402,17 @@ def get_digest_batch_jobs(user_id: int, batch: str) -> list[dict]:
         (user_id, batch),
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [as_dict(r) for r in rows]
 
 
 # ── Digest runs (so the dashboard can say what happened) ───────────────────
 
 def start_digest_run(user_id: int) -> int:
     conn = get_conn()
-    cur = conn.execute("INSERT INTO digest_runs (user_id) VALUES (?)", (user_id,))
-    run_id = cur.lastrowid
+    cur = conn.execute(
+        "INSERT INTO digest_runs (user_id) VALUES (?) RETURNING id", (user_id,)
+    )
+    run_id = cur.fetchone()["id"]
     conn.commit()
     conn.close()
     return run_id

@@ -52,7 +52,8 @@ your dashboard — you just don't get the daily digest.
 | `DIGEST_HOUR` / `TIMEZONE` | No | When the daily digest runs. Defaults to 8am UTC. |
 | `DIGEST_LIMIT` | No | Jobs per digest email. Defaults to 10. |
 | `REPLY_POLL_MINUTES` | No | How often to check for replies. Defaults to 15. |
-| `DB_PATH` | No | SQLite file location. Defaults to `jobagent.db`. |
+| `DATABASE_URL` | Hosted | Postgres connection string. Leave empty to use a SQLite file. Set it for any deployment — see Database. |
+| `DB_PATH` | No | SQLite file location, when `DATABASE_URL` is empty. Defaults to `jobagent.db`. |
 
 ## Which AI Provider
 
@@ -115,27 +116,30 @@ any request for a row that belongs to someone else.
 ## Deploy to Replit
 
 1. Import this repo into Replit.
-2. Add these to **Secrets** (the padlock in the sidebar), not to a `.env` file:
-   `GEMINI_API_KEY`, `SECRET_KEY`, `SMTP_USER`, `SMTP_PASS`, `DB_PATH`.
-   Generate the secret key with
+2. Add a Postgres database in Replit and copy its connection string. Do this
+   before anything else — see below for why.
+3. Add these to **Secrets** (the padlock in the sidebar), not to a `.env` file:
+   `DATABASE_URL` (from step 2), `GEMINI_API_KEY`, `SECRET_KEY`, `SMTP_USER`,
+   `SMTP_PASS`. Generate the secret key with
    `python -c "import secrets; print(secrets.token_hex(32))"`.
-3. Deploy as a **Reserved VM**. Autoscale is the default and it is the wrong
+4. Deploy as a **Reserved VM**. Autoscale is the default and it is the wrong
    choice here: it sleeps when nobody is browsing, and a sleeping process sends
    no morning digest and never checks for replies. `.replit` already asks for a
    Reserved VM, but the deploy screen lets you override it, so check.
-4. Copy the deployment URL into a `BASE_URL` secret and redeploy. Invite links
+5. Copy the deployment URL into a `BASE_URL` secret and redeploy. Invite links
    are built from it, so until it's set they point at localhost.
-5. Open the URL. The first account you create becomes the owner.
+6. Open the URL. The first account you create becomes the owner.
 
 The console prints what's still missing on every boot. If a key is absent it
 names the key and says what breaks, so read that line before assuming the deploy
 worked.
 
-**Where the database lives.** Accounts, resumes and saved jobs are one SQLite
-file. Point `DB_PATH` at a path that survives a redeploy, or everyone's account
-disappears the next time you push. If Replit gives you no persistent disk, move
-to Postgres before you invite anyone; losing your own test account is annoying,
-losing a friend's resume is worse.
+**Why Postgres and not the SQLite file.** Replit rebuilds the container's
+filesystem when you redeploy, which deletes the SQLite file and every account,
+resume and saved job in it. You would not notice until a friend tried to sign in
+after your next push. Set `DATABASE_URL` and the data lives outside the
+container instead. Same code either way: leave `DATABASE_URL` empty locally and
+it falls back to SQLite with no setup.
 
 ## Deploy to Railway
 
@@ -144,8 +148,29 @@ losing a friend's resume is worse.
 3. Add the environment variables above
 4. Set `BASE_URL` to your Railway URL
 
-Note: SQLite lives on the container's disk. On a host with an ephemeral filesystem, point
-`DB_PATH` at a mounted volume or your accounts will disappear on redeploy.
+Add a Postgres database and set `DATABASE_URL`, or attach a volume and point `DB_PATH` at
+it. Railway rebuilds the container on deploy, so a SQLite file on the container's own disk
+takes every account with it.
+
+## Database
+
+Two backends, one set of code. `DATABASE_URL` decides which:
+
+| `DATABASE_URL` | Backend | Use it for |
+|---|---|---|
+| empty | SQLite file at `DB_PATH` | local development, no setup |
+| a Postgres URL | Postgres | anything hosted |
+
+The SQL is written once in SQLite's dialect and translated in `db/connection.py`,
+which handles the three things that actually differ: placeholders, auto-incrementing
+ids, and how you ask what columns a table has. The schema is translated from
+`db/schema.sql` rather than duplicated, so the backends can't drift apart.
+
+To run the tests against Postgres:
+
+```bash
+DATABASE_URL=postgresql://user:pass@host/db pytest
+```
 
 ## Job Sources
 

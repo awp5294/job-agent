@@ -5,12 +5,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 import server
-from db import database
+from db import connection, database
 
 
 @pytest.fixture(autouse=True)
 def fresh_db(tmp_path, monkeypatch):
-    """Every test gets its own empty database."""
+    """Every test gets its own empty database.
+
+    A new file is enough for SQLite. Postgres is one shared server, so run the
+    suite against it with DATABASE_URL set and the schema is wiped per test
+    instead — otherwise the first account created leaks into every later test
+    and the invite gate starts rejecting everyone.
+    """
+    if connection.database_url():
+        conn = database.get_conn()
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")
+        conn.commit()
+        conn.close()
+        database.init_db()
+        yield
+        return
+
     db_file = tmp_path / f"{uuid.uuid4().hex}.db"
     monkeypatch.setenv("DB_PATH", str(db_file))
     database.set_db_path(str(db_file))

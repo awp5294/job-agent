@@ -9,6 +9,10 @@ google-genai==2.16.0
 httpx==0.28.1
 beautifulsoup4==4.12.3
 apscheduler==3.11.0
+
+# Only needed when DATABASE_URL points at Postgres. Hosted deployments want it:
+# most hosts rebuild the filesystem on redeploy and a SQLite file goes with it.
+psycopg[binary]==3.2.3
 pypdf==5.1.0
 python-dotenv==1.0.1
 pydantic==2.10.5
