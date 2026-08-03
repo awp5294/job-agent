@@ -112,6 +112,31 @@ leave public — the only exception is the very first account, which bootstraps 
 Each user's jobs, criteria, resume and cover letters are private to them; the API refuses
 any request for a row that belongs to someone else.
 
+## Deploy to Replit
+
+1. Import this repo into Replit.
+2. Add these to **Secrets** (the padlock in the sidebar), not to a `.env` file:
+   `GEMINI_API_KEY`, `SECRET_KEY`, `SMTP_USER`, `SMTP_PASS`, `DB_PATH`.
+   Generate the secret key with
+   `python -c "import secrets; print(secrets.token_hex(32))"`.
+3. Deploy as a **Reserved VM**. Autoscale is the default and it is the wrong
+   choice here: it sleeps when nobody is browsing, and a sleeping process sends
+   no morning digest and never checks for replies. `.replit` already asks for a
+   Reserved VM, but the deploy screen lets you override it, so check.
+4. Copy the deployment URL into a `BASE_URL` secret and redeploy. Invite links
+   are built from it, so until it's set they point at localhost.
+5. Open the URL. The first account you create becomes the owner.
+
+The console prints what's still missing on every boot. If a key is absent it
+names the key and says what breaks, so read that line before assuming the deploy
+worked.
+
+**Where the database lives.** Accounts, resumes and saved jobs are one SQLite
+file. Point `DB_PATH` at a path that survives a redeploy, or everyone's account
+disappears the next time you push. If Replit gives you no persistent disk, move
+to Postgres before you invite anyone; losing your own test account is annoying,
+losing a friend's resume is worse.
+
 ## Deploy to Railway
 
 1. Push this repo to GitHub

@@ -11,4 +11,7 @@ packages = ["gitFull", "libxcrypt", "playwright-driver"]
 
 [deployment]
 run = ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port 8080"]
-deploymentTarget = "cloudrun"
+# Reserved VM, not Autoscale. Autoscale sleeps when no one is browsing, and a
+# sleeping process runs no scheduler: no morning digest, no reply polling. This
+# app does most of its work with nobody watching, so it has to stay up.
+deploymentTarget = "gce"
