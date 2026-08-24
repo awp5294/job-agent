@@ -15,18 +15,22 @@ The app needs its own email account. Every digest is sent from it, and every
 reply comes back to it. Don't use your personal Gmail: replies from your friends
 land in this inbox and the app marks them as read.
 
-1. Make a new Gmail, something like `yournamejobagent@gmail.com`.
+1. Make a new Gmail, something like `yournamejobagent@gmail.com`. The address can
+   be anything you want; nothing here depends on its length or wording.
 2. Sign in to it.
 3. Turn on 2-Step Verification: **Google Account → Security → 2-Step
    Verification**. You have to do this or the next step won't exist.
 4. Go to https://myaccount.google.com/apppasswords
 5. Type any name (`job agent`), click **Create**.
-6. Google shows you 16 characters. Copy them. Delete the spaces.
-   **This is the only time it shows you this**, so paste it somewhere now.
+6. Google generates a password and shows it as 16 characters in four groups, like
+   `abcd efgh ijkl mnop`. Copy it and delete the spaces, so you have
+   `abcdefghijklmnop`. You don't pick this and you can't change it.
+   **This is the only time Google shows it**, so paste it somewhere now.
 7. Turn on IMAP: in that Gmail, **Settings (gear) → See all settings →
    Forwarding and POP/IMAP → Enable IMAP → Save Changes**.
 
-Hold on to two things: the address, and the 16 characters.
+Hold on to two things: the email address, and the generated password. They go into
+two different secrets later, `SMTP_USER` and `SMTP_PASS`.
 
 > Skipping the IMAP step is the failure that's hardest to spot. Digests go out
 > fine and replies are never read, so it half works and nothing says why.
@@ -72,10 +76,12 @@ Click the **padlock icon** (Secrets) in the left sidebar. Add each of these with
 | `GEMINI_API_KEY` | your Gemini key |
 | `SECRET_KEY` | any long random string; mash the keyboard for 40 characters |
 | `SMTP_USER` | the Gmail address from step 1 |
-| `SMTP_PASS` | the 16 characters from step 1, no spaces |
+| `SMTP_PASS` | the generated App Password from step 1, spaces removed |
 
-`SMTP_PASS` is the App Password, **not** the password you type to sign in to
-Gmail. Google rejects the normal one.
+`SMTP_PASS` is the App Password Google generated, **not** the password you type to
+sign in to Gmail. Google rejects the normal one. It should be 16 characters with
+no spaces; if what you have is longer, shorter, or something you chose yourself,
+it's the wrong value.
 
 ---
 
