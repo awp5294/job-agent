@@ -115,13 +115,16 @@ any request for a row that belongs to someone else.
 
 ## Deploy to Replit
 
+If you haven't done this before, **[DEPLOY.md](DEPLOY.md) walks through every
+click**, including making the mailbox and testing it on yourself before you
+invite anyone. The short version:
+
 1. Import this repo into Replit.
-2. Add a Postgres database in Replit and copy its connection string. Do this
-   before anything else — see below for why.
+2. Tools → **Database** → create one. Replit sets `DATABASE_URL` itself, so
+   there's nothing to copy. Do this before anything else; see below for why.
 3. Add these to **Secrets** (the padlock in the sidebar), not to a `.env` file:
-   `DATABASE_URL` (from step 2), `GEMINI_API_KEY`, `SECRET_KEY`, `SMTP_USER`,
-   `SMTP_PASS`. Generate the secret key with
-   `python -c "import secrets; print(secrets.token_hex(32))"`.
+   `GEMINI_API_KEY`, `SECRET_KEY`, `SMTP_USER`, `SMTP_PASS`. Generate the secret
+   key with `python -c "import secrets; print(secrets.token_hex(32))"`.
 4. Deploy as a **Reserved VM**. Autoscale is the default and it is the wrong
    choice here: it sleeps when nobody is browsing, and a sleeping process sends
    no morning digest and never checks for replies. `.replit` already asks for a

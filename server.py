@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from apply.cover_letter import generate_cover_letter
+from db.connection import POSTGRES as _POSTGRES, backend as _db_backend
 from db.database import (
     attach_user_to_session, clear_session, count_users, create_session,
     create_user, finish_digest_run, get_all_users, get_criteria,
@@ -88,6 +89,10 @@ signer = URLSafeSerializer(SECRET_KEY)
 scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
 
+def db_backend_is_postgres() -> bool:
+    return _db_backend() == _POSTGRES
+
+
 def startup_report() -> list[str]:
     """Things that would make the app quietly do nothing. Printed at boot."""
     problems = []
@@ -111,10 +116,20 @@ def startup_report() -> list[str]:
             "address and an App Password). Without it nobody receives a digest "
             "and replies can't be read; matches only appear on the dashboard."
         )
-    if BASE_URL.startswith("http://localhost") or BASE_URL.startswith("http://127."):
+    is_local = BASE_URL.startswith("http://localhost") or BASE_URL.startswith("http://127.")
+    if is_local:
         problems.append(
             f"BASE_URL is {BASE_URL} — fine locally, but invite links will be "
             "broken if this is a real deployment."
+        )
+    elif not db_backend_is_postgres():
+        # The quietest way to lose everyone's account: it works, friends sign up,
+        # then the next redeploy rebuilds the container and takes the file with it.
+        problems.append(
+            f"DATABASE_URL is not set, so accounts live in a file ({DB_PATH}). "
+            f"BASE_URL is {BASE_URL}, so this looks hosted — most hosts erase that "
+            "file on redeploy and every account, resume and saved job goes with it. "
+            "Add a Postgres database and set DATABASE_URL before inviting anyone."
         )
     return problems
 
