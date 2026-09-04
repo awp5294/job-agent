@@ -24,6 +24,7 @@ _db_path: str | None = None
 USER_FIELDS = {
     "name", "email", "password_hash", "resume_text", "linkedin_url",
     "phone", "auto_apply", "invite_token", "login_token", "is_owner",
+    "llm_api_key",
 }
 CRITERIA_FIELDS = {
     "job_titles", "min_salary", "max_salary", "locations", "remote_preference",
@@ -93,6 +94,7 @@ def init_db(path: str | None = None):
         ("users", "login_token", "ALTER TABLE users ADD COLUMN login_token TEXT"),
         ("users", "password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT"),
         ("users", "is_owner", "ALTER TABLE users ADD COLUMN is_owner INTEGER DEFAULT 0"),
+        ("users", "llm_api_key", "ALTER TABLE users ADD COLUMN llm_api_key TEXT"),
         ("user_jobs", "digest_batch", "ALTER TABLE user_jobs ADD COLUMN digest_batch TEXT"),
         ("user_jobs", "digest_position", "ALTER TABLE user_jobs ADD COLUMN digest_position INTEGER"),
     ]:

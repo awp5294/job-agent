@@ -41,7 +41,7 @@ def stub_sources(monkeypatch):
     monkeypatch.setattr(server, "fetch_indeed_jobs", lambda titles, locations: [])
     monkeypatch.setattr(server, "fetch_remotive_jobs", lambda titles: [])
 
-    def fake_score(all_jobs, user_id, criteria):
+    def fake_score(all_jobs, user_id, criteria, credentials=None):
         results = []
         for job in all_jobs:
             if "Product Manager" in job["title"] or "PM" in job["title"]:
@@ -123,7 +123,8 @@ def test_digest_sends_ten_jobs_and_saves_the_rest_for_next_time(signed_up, sent_
     # Descending scores, so the cut is by quality rather than arbitrary.
     monkeypatch.setattr(
         server, "score_jobs_for_user",
-        lambda jobs, uid, crit: [(j, 99 - i, "match") for i, j in enumerate(jobs)],
+        lambda jobs, uid, crit, credentials=None: [(j, 99 - i, "match")
+                                                    for i, j in enumerate(jobs)],
     )
 
     user = database.get_user_by_email("ada@example.com")
@@ -165,7 +166,7 @@ def test_digest_records_source_failures_instead_of_swallowing_them(signed_up, mo
     monkeypatch.setattr(server, "fetch_lever_jobs", lambda slug: [])
     monkeypatch.setattr(server, "fetch_indeed_jobs", lambda t, l: [])
     monkeypatch.setattr(server, "fetch_remotive_jobs", lambda titles: [])
-    monkeypatch.setattr(server, "score_jobs_for_user", lambda j, u, c: [])
+    monkeypatch.setattr(server, "score_jobs_for_user", lambda j, u, c, credentials=None: [])
 
     asyncio.run(server.run_digest_for_user(user["id"]))
     run = database.get_latest_digest_run(user["id"])
@@ -307,6 +308,10 @@ def test_a_reply_is_matched_to_the_person_who_sent_it(signed_up, browser, stub_s
     grace_browser.get(f"/onboard?invite={ada['invite_token']}")
     walk_onboarding(grace_browser, email="grace@example.com")
     grace = database.get_user_by_email("grace@example.com")
+    # A friend scores with their own key, never Ada's. Give Grace one.
+    from secretbox import seal
+    database.update_user(grace["id"], {"llm_api_key": seal("AIzaGraceOwnKey000000000000000")})
+    grace = database.get_user(grace["id"])
 
     for user in (ada, grace):
         configure_sources(user["id"])

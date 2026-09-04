@@ -15,7 +15,7 @@ go to employers, so a mangled sentence is worse than a slightly stiff one.
 """
 import re
 
-from llm import LLMError, complete_text
+from llm import Credentials, LLMError, complete_text
 
 MAX_REVISIONS = 1
 
@@ -214,6 +214,7 @@ def generate_cover_letter(
     job_description: str,
     resume_text: str = "",
     criteria: dict | None = None,
+    credentials: Credentials | None = None,
 ) -> str:
     """Write a letter, check it for AI tells, and revise once if it has any."""
     system = _system_prompt(resume_text)
@@ -223,7 +224,8 @@ Job Title: {job_title}
 Company: {company}
 Description: {(job_description or '')[:1500]}"""
 
-    letter = stop_slop(complete_text(system=system, prompt=prompt, max_tokens=4000))
+    letter = stop_slop(complete_text(system=system, prompt=prompt, max_tokens=4000,
+                                     credentials=credentials))
 
     for _ in range(MAX_REVISIONS):
         issues = find_slop(letter)
@@ -234,6 +236,7 @@ Description: {(job_description or '')[:1500]}"""
                 system=system,
                 prompt=_revision_prompt(letter, issues),
                 max_tokens=4000,
+                credentials=credentials,
             ))
         except LLMError as exc:
             # A failed revision is not a failed letter. Keep the draft.

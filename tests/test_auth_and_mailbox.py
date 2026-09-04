@@ -82,7 +82,8 @@ def test_the_password_is_not_stored_in_the_clear(signed_up):
 
 def test_a_weak_password_is_rejected_during_onboarding(client):
     walk_onboarding(client, answers=["Ada", "ada@example.com", "PM", "London",
-                                     "remote", "skip", "skip", "x" * 60])
+                                     "remote", "skip", "skip", "x" * 60,
+                                     "skip"])   # no AI key of their own
     response = client.post("/api/chat", json={"message": "abc"})
     assert "at least 8" in response.json()["reply"]
     assert response.json()["action"] is None

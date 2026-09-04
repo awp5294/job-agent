@@ -52,8 +52,11 @@ from email_handler.mailbox import (
     MailboxError, extract_reply_numbers, fetch_replies, mailbox_address,
     mailbox_configured, send_email,
 )
-from llm import LLMError
+from llm import (
+    Credentials, LLMError, credentials_from_key, server_credentials, verify_credentials,
+)
 from llm import describe as llm_describe
+from secretbox import SecretBoxError, seal, unseal
 from matching.scorer import score_jobs_for_user
 from sourcing.greenhouse import fetch_greenhouse_jobs
 from sourcing.indeed import fetch_indeed_jobs
@@ -93,6 +96,55 @@ def db_backend_is_postgres() -> bool:
     return _db_backend() == _POSTGRES
 
 
+# ── Whose key pays for whose jobs ──────────────────────────────────────────
+# Each person brings their own AI key. The server's key from the environment
+# only ever serves the owner's account, so inviting a friend never means paying
+# for their searches.
+
+NO_KEY_MESSAGE = (
+    "No AI key on your account, so nothing can be scored or written yet. Add "
+    "your own key in Settings: Gemini, Claude, ChatGPT or Grok all work. A Gemini "
+    "key is free at aistudio.google.com/apikey."
+)
+
+
+def credentials_for_user(user: dict) -> Credentials:
+    """The key this person's jobs are scored and written with.
+
+    Their own if they've added one. The server's only if they are the owner.
+    Anyone else gets an LLMError that tells them where to add a key.
+    """
+    sealed = user.get("llm_api_key")
+    if sealed:
+        try:
+            return credentials_from_key(unseal(sealed))
+        except SecretBoxError:
+            raise LLMError(
+                "Your saved AI key can't be read any more (the server's "
+                "SECRET_KEY changed). Add it again in Settings."
+            )
+    if user.get("is_owner"):
+        return server_credentials()
+    raise LLMError(NO_KEY_MESSAGE)
+
+
+def ai_problem(user: dict) -> str | None:
+    """Why this account can't use AI right now, or None if it can."""
+    try:
+        credentials_for_user(user)
+    except LLMError as exc:
+        return str(exc)
+    return None
+
+
+def mask_key(api_key: str) -> str:
+    """Enough of a key to recognise it, not enough to use it: 'AIza…k3f9'."""
+    key = api_key or ""
+    if len(key) <= 8:
+        return "•" * len(key)
+    return f"{key[:4]}…{key[-4:]}"
+
+
 def startup_report() -> list[str]:
     """Things that would make the app quietly do nothing. Printed at boot."""
     problems = []
@@ -102,8 +154,9 @@ def startup_report() -> list[str]:
         llm_provider = f"not configured — {exc}"
     if "not configured" in llm_provider:
         problems.append(
-            f"No AI key set ({llm_provider}) — jobs can't be scored and no cover "
-            "letters can be written. Nothing will reach anyone's inbox."
+            f"No server AI key set ({llm_provider}). This only affects the owner's "
+            "account: everyone else scores jobs with their own key. The owner "
+            "can add a personal key in Settings instead."
         )
     if SECRET_KEY == "change-me-in-production":
         problems.append(
@@ -254,9 +307,16 @@ ONBOARD_STEPS = [
     {"key": "salary",      "prompt": "What's your salary range? (e.g. $120k-$160k, or skip)"},
     {"key": "seniority",   "prompt": "Seniority levels? (e.g. Senior, Staff, Lead — or skip)"},
     {"key": "resume",      "prompt": "Upload your resume (PDF) or paste the text below so I can tailor cover letters."},
+    {"key": "api_key",     "prompt": (
+        "Nearly done. Paste your own AI API key. Every job is scored and every cover "
+        "letter written with your key, so you're never spending anyone else's. Gemini "
+        "(free at aistudio.google.com/apikey), Claude, ChatGPT and Grok all work; I can "
+        "tell which from the key itself. Or type skip and add it later in Settings."
+    )},
     {"key": "password",    "prompt": "Last step — pick a password so you can sign back in later (at least 8 characters)."},
 ]
 TOTAL_STEPS = len(ONBOARD_STEPS)
+STEP_INDEX = {step["key"]: i for i, step in enumerate(ONBOARD_STEPS)}
 
 
 @app.get("/onboard", response_class=HTMLResponse)
@@ -354,6 +414,17 @@ def _parse_step(key: str, message: str, data: dict) -> str | None:
         if len(message.strip()) > 50:
             data["resume_text"] = message.strip()[:8000]
 
+    elif key == "api_key":
+        if message.lower() in ("skip", ""):
+            data.pop("llm_api_key", None)
+        else:
+            try:
+                credentials_from_key(message)
+            except LLMError as exc:
+                return f"{exc} Check it and paste again, or type skip."
+            # Sealed even in the session table: it's a real key from here on.
+            data["llm_api_key"] = seal(message.strip())
+
     elif key == "password":
         try:
             data["password_hash"] = hash_password(message)
@@ -382,6 +453,8 @@ def create_account_from_state(state: dict, email: str) -> int:
     update_criteria(user_id, criteria)
     if data.get("resume_text"):
         update_user(user_id, {"resume_text": data["resume_text"]})
+    if data.get("llm_api_key"):
+        update_user(user_id, {"llm_api_key": data["llm_api_key"]})
     if inviter:
         print(f"[signup] user {user_id} joined via invite from user {inviter['id']}")
     return user_id
@@ -405,6 +478,20 @@ async def chat(request: Request):
     error = _parse_step(step["key"], message, data)
     if error:
         return _chat_reply(sid, error, step_num)
+
+    # Check the key with its provider now. A bad key found at 8am fails a digest
+    # nobody is watching; a bad key found here gets pasted again in ten seconds.
+    if step["key"] == "api_key" and data.get("llm_api_key"):
+        try:
+            await asyncio.to_thread(
+                verify_credentials, credentials_from_key(unseal(data["llm_api_key"]))
+            )
+        except LLMError as exc:
+            data.pop("llm_api_key", None)
+            return _chat_reply(
+                sid, f"That key was rejected: {exc} Paste it again, or type skip.",
+                step_num,
+            )
 
     # An email that already has an account is a sign-in, not a sign-up — and it
     # has to go through a path that proves identity.
@@ -459,8 +546,11 @@ def _create_account(sid: str, state: dict):
         "Heads up: email isn't set up on this deployment yet, so your matches "
         "will only appear on your dashboard for now."
     )
+    key_note = ""
+    if ai_problem(get_user(user_id)):
+        key_note = " One thing first: add your AI key in Settings, or nothing can be scored."
     response = _chat_reply(
-        sid, f"You're all set. {where} Taking you to your dashboard...",
+        sid, f"You're all set. {where}{key_note} Taking you to your dashboard...",
         state["step_num"], "redirect:/dashboard",
     )
     sign_in(response, sid, user_id)
@@ -473,6 +563,8 @@ def _next_prompt(state: dict) -> tuple[str, int, str | None]:
     step = ONBOARD_STEPS[step_num]
     if step["key"] == "resume":
         return step["prompt"], step_num, "show_resume_upload"
+    if step["key"] == "api_key":
+        return step["prompt"], step_num, "show_secret"
     if step["key"] == "password":
         return step["prompt"], step_num, "show_password"
     return step["prompt"].format(**state.get("data", {})), step_num, None
@@ -495,16 +587,15 @@ async def resume_upload(request: Request, file: UploadFile = File(...)):
         text = content.decode("utf-8", errors="ignore")
 
     data["resume_text"] = text[:8000]
-    # Jump to the final step regardless of where they were — the upload IS the
-    # answer to the resume question.
-    state["step_num"] = len(ONBOARD_STEPS) - 1
+    # The upload IS the answer to the resume question, wherever they were, so
+    # move straight on to the step after it.
+    state["step_num"] = STEP_INDEX["resume"] + 1
     state["data"] = data
     set_session_state(sid, state)
 
+    prompt, step_num, action = _next_prompt(state)
     return _chat_reply(
-        sid,
-        f"Got it — {len(text.split())} words. {ONBOARD_STEPS[-1]['prompt']}",
-        state["step_num"], "show_password",
+        sid, f"Got it — {len(text.split())} words. {prompt}", step_num, action,
     )
 
 
@@ -584,6 +675,7 @@ async def dashboard(request: Request):
         {
             "user": user,
             "mail_ready": mailbox_configured(),
+            "ai_problem": ai_problem(user),
         },
     )
 
@@ -593,12 +685,21 @@ async def settings_get(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse("/onboard")
+    api_key_masked = None
+    if user.get("llm_api_key"):
+        try:
+            api_key_masked = mask_key(unseal(user["llm_api_key"]))
+        except SecretBoxError:
+            api_key_masked = "unreadable (SECRET_KEY changed) — add it again"
     return templates.TemplateResponse(
         request,
         "settings.html",
         {
             "user": user,
             "criteria": get_criteria(user["id"]) or {},
+            "api_key_masked": api_key_masked,
+            "ai_problem": ai_problem(user),
+            "key_error": request.query_params.get("key_error"),
             "invite_url": f"{BASE_URL}/onboard?invite={user['invite_token']}",
             "signin_url": f"{BASE_URL}/auth/token?t={user['login_token']}",
             "mailbox_address": mailbox_address(),
@@ -632,6 +733,21 @@ async def settings_post(request: Request):
         "greenhouse_companies": csv("greenhouse_companies"),
         "lever_companies": csv("lever_companies"),
     })
+
+    # The key field is blank on every normal save; only act on it when it isn't.
+    new_key = (form.get("llm_api_key") or "").strip()
+    if form.get("remove_api_key"):
+        update_user(user["id"], {"llm_api_key": None})
+    elif new_key:
+        try:
+            credentials = credentials_from_key(new_key)
+            await asyncio.to_thread(verify_credentials, credentials)
+        except LLMError as exc:
+            from urllib.parse import quote
+            return RedirectResponse(f"/settings?key_error={quote(str(exc))}",
+                                    status_code=303)
+        update_user(user["id"], {"llm_api_key": seal(new_key)})
+
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 
@@ -655,6 +771,10 @@ async def api_select_job(uj_id: int, request: Request):
     cover_letter = uj.get("cover_letter_text")
     if not cover_letter:
         try:
+            credentials = credentials_for_user(user)
+        except LLMError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        try:
             cover_letter = await asyncio.to_thread(
                 generate_cover_letter,
                 job_title=uj["title"],
@@ -662,6 +782,7 @@ async def api_select_job(uj_id: int, request: Request):
                 job_description=uj.get("description", ""),
                 resume_text=user.get("resume_text") or "",
                 criteria=get_criteria(user["id"]) or {},
+                credentials=credentials,
             )
         except LLMError as exc:
             # Leave the job where it was so the user can retry from the same
@@ -778,6 +899,13 @@ async def run_digest_for_user(user_id: int) -> dict:
         finish_digest_run(run_id, "error", message="User not found")
         return {"status": "error"}
 
+    # No key means no scoring, so don't pull thousands of postings for nothing.
+    try:
+        credentials = credentials_for_user(user)
+    except LLMError as exc:
+        finish_digest_run(run_id, "error", message=str(exc))
+        return {"status": "error", "message": str(exc)}
+
     criteria = get_criteria(user_id) or {}
     try:
         all_jobs, problems = await asyncio.to_thread(_collect_jobs, criteria)
@@ -805,7 +933,9 @@ async def run_digest_for_user(user_id: int) -> dict:
             problems.append(f"store {job.get('title')!r}: {exc}")
 
     try:
-        scored = await asyncio.to_thread(score_jobs_for_user, all_jobs, user_id, criteria)
+        scored = await asyncio.to_thread(
+            score_jobs_for_user, all_jobs, user_id, criteria, credentials
+        )
     except Exception as exc:
         finish_digest_run(run_id, "error", len(all_jobs),
                           message=f"Scoring failed: {exc}")
@@ -883,6 +1013,11 @@ async def apply_reply(user: dict, numbers: list[int]) -> dict:
     criteria = get_criteria(user_id) or {}
     selected, prepared = [], []
 
+    try:
+        credentials, key_problem = credentials_for_user(user), None
+    except LLMError as exc:
+        credentials, key_problem = None, str(exc)
+
     for number in numbers:
         uj = by_position.get(number)
         # Only act on jobs still sitting in the digest — replying twice, or a
@@ -893,6 +1028,8 @@ async def apply_reply(user: dict, numbers: list[int]) -> dict:
         full = get_user_job(uj["id"])
         cover_letter, note = "", ""
         try:
+            if key_problem:
+                raise LLMError(key_problem)
             cover_letter = await asyncio.to_thread(
                 generate_cover_letter,
                 job_title=full["title"],
@@ -900,6 +1037,7 @@ async def apply_reply(user: dict, numbers: list[int]) -> dict:
                 job_description=full.get("description", ""),
                 resume_text=user.get("resume_text") or "",
                 criteria=criteria,
+                credentials=credentials,
             )
         except LLMError as exc:
             # Still select the job — the person asked for it. They just get the

@@ -177,7 +177,9 @@ def test_resume_upload_accepts_plain_text(client):
         "/api/resume-upload",
         files={"file": ("resume.txt", b"Ten years of product work.", "text/plain")},
     )
-    assert response.json()["action"] == "show_password"
+    # The upload answers the resume question; the AI-key question comes next.
+    assert response.json()["action"] == "show_secret"
+    client.post("/api/chat", json={"message": "skip"})
     client.post("/api/chat", json={"message": "a-good-password"})
     user = database.get_user_by_email("ada@example.com")
     assert "Ten years of product work." in user["resume_text"]

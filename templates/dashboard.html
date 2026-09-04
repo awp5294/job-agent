@@ -22,6 +22,13 @@
       <button class="btn-primary" id="run-digest-btn" onclick="runDigest()">🔄 Run digest</button>
     </div>
 
+    {% if ai_problem %}
+    <div class="alert-warning">
+      <strong>Add your AI key before running a digest.</strong> {{ ai_problem }}
+      <a href="/settings">Open Settings</a>.
+    </div>
+    {% endif %}
+
     {% if not mail_ready %}
     <div class="alert-warning">
       <strong>Email isn't set up on this deployment yet</strong>, so no digests

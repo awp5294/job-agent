@@ -1,7 +1,7 @@
-"""Score jobs against a user's criteria with Claude."""
+"""Score jobs against a user's criteria with the model behind their key."""
 from pydantic import BaseModel, Field
 
-from llm import LLMError, complete_json
+from llm import Credentials, LLMError, complete_json
 
 # Only jobs at or above this score make it into a digest.
 MATCH_THRESHOLD = 70
@@ -56,7 +56,8 @@ Salary: {job.get('salary_min')} to {job.get('salary_max')}
 Description: {(job.get('description') or '')[:800]}"""
 
 
-def score_job(job: dict, criteria: dict) -> tuple[int, str]:
+def score_job(job: dict, criteria: dict,
+              credentials: Credentials | None = None) -> tuple[int, str]:
     """Return (score, reason) for one job. Never raises — scoring is best-effort."""
     prompt = (
         f"CANDIDATE CRITERIA:\n{_criteria_block(criteria)}\n\n"
@@ -65,7 +66,8 @@ def score_job(job: dict, criteria: dict) -> tuple[int, str]:
     try:
         # Low effort: this is a bounded classification, not open-ended reasoning.
         result = complete_json(
-            system=SYSTEM, prompt=prompt, schema=JobScore, max_tokens=2000, effort="low"
+            system=SYSTEM, prompt=prompt, schema=JobScore, max_tokens=2000, effort="low",
+            credentials=credentials,
         )
     except LLMError as exc:
         print(f"[scorer] {job.get('title')!r}: {exc}")
@@ -73,14 +75,14 @@ def score_job(job: dict, criteria: dict) -> tuple[int, str]:
     return result.score, result.reason
 
 
-def score_jobs_for_user(all_jobs: list[dict], user_id: int,
-                        criteria: dict) -> list[tuple[dict, int, str]]:
+def score_jobs_for_user(all_jobs: list[dict], user_id: int, criteria: dict,
+                        credentials: Credentials | None = None) -> list[tuple[dict, int, str]]:
     """Score every stored job and keep the ones at or above the match threshold."""
     results = []
     for job in all_jobs:
         if not job.get("id"):
             continue
-        score, reason = score_job(job, criteria)
+        score, reason = score_job(job, criteria, credentials)
         if score >= MATCH_THRESHOLD:
             results.append((job, score, reason))
     return results

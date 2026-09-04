@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     invite_token TEXT UNIQUE,      -- token this user hands out to invite friends
     login_token TEXT UNIQUE,       -- personal sign-in token (fallback when Google OAuth isn't configured)
     is_owner INTEGER DEFAULT 0,    -- 1 for the first account created on this deployment
+    llm_api_key TEXT,              -- the user's own AI key, sealed with SECRET_KEY (secretbox.py)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
