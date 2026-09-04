@@ -158,6 +158,13 @@ They open it, answer the same chat with their own email, their own criteria and
 their own resume, and pick their own password. They get their own dashboard and
 their own daily digest. They can't see your jobs and you can't see theirs.
 
+**They'll be asked for their own AI key.** Gemini, Claude, ChatGPT or Grok, whichever
+they have; the app tells them apart from the key itself. The onboarding chat points
+them at aistudio.google.com/apikey, where a Gemini key is free and takes a minute.
+Their searches run on their key, not yours. If they skip it, their dashboard tells them
+to add one in Settings before anything can be scored. Your `GEMINI_API_KEY`
+secret only ever serves your own account.
+
 Every account gets its own invite link, so they can pass it on.
 
 ---

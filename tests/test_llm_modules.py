@@ -166,7 +166,8 @@ def test_a_scoring_failure_does_not_crash_the_digest(monkeypatch):
 
 def test_only_jobs_over_the_threshold_are_kept(monkeypatch):
     scores = iter([(91, "Great"), (55, "Meh"), (70, "Borderline")])
-    monkeypatch.setattr("matching.scorer.score_job", lambda job, criteria: next(scores))
+    monkeypatch.setattr("matching.scorer.score_job",
+                        lambda job, criteria, credentials=None: next(scores))
 
     jobs = [dict(JOB, id=i, title=f"Job {i}") for i in (1, 2, 3)]
     kept = score_jobs_for_user(jobs, user_id=1, criteria=CRITERIA)
@@ -176,7 +177,7 @@ def test_only_jobs_over_the_threshold_are_kept(monkeypatch):
 
 def test_jobs_that_failed_to_store_are_skipped(monkeypatch):
     monkeypatch.setattr("matching.scorer.score_job",
-                        lambda job, criteria: pytest.fail("should not be scored"))
+                        lambda job, criteria, credentials=None: pytest.fail("should not be scored"))
     assert score_jobs_for_user([{"title": "No id"}], 1, CRITERIA) == []
 
 

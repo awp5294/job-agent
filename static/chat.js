@@ -55,11 +55,19 @@ function handleAction(action) {
   if (!action) return;
   if (action === 'show_resume_upload') {
     document.getElementById('resume-upload-area').style.display = 'flex';
-  } else if (action === 'show_password') {
+  } else if (action === 'show_password' || action === 'show_secret') {
+    /* Same masked box for both: an API key on screen is as sensitive as a
+       password. Only the placeholder changes. */
     document.getElementById('resume-upload-area').style.display = 'none';
     document.getElementById('password-area').style.display = 'flex';
+    const input = document.getElementById('password-input');
+    const button = document.querySelector('#password-area button');
+    input.placeholder = action === 'show_secret'
+      ? 'Paste your API key, or type skip'
+      : 'Pick a password (at least 8 characters)';
+    button.textContent = action === 'show_secret' ? 'Continue' : 'Create account';
     lockInput(true);
-    document.getElementById('password-input').focus();
+    input.focus();
   } else if (action.startsWith('redirect:')) {
     setTimeout(() => { window.location.href = action.slice('redirect:'.length); }, 800);
   }
@@ -91,7 +99,7 @@ async function sendMessage() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     applyResponse(data);
-    lockInput(data.action === 'show_password');
+    lockInput(data.action === 'show_password' || data.action === 'show_secret');
   } catch (e) {
     removeTyping();
     appendBot('Something went wrong. Please try again.');

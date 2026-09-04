@@ -39,7 +39,7 @@ your dashboard — you just don't get the daily digest.
 
 | Variable | Required | Description |
 |---|---|---|
-| `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` | Yes | One AI key. Either provider works — see below. |
+| `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `XAI_API_KEY` | For the owner | The owner's AI key. Everyone else brings their own — see below. |
 | `SECRET_KEY` | Yes | Random string for session signing — `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `BASE_URL` | Yes | Your public URL, e.g. `https://yourapp.railway.app`. Used for invite links. |
 | `SMTP_USER` / `SMTP_PASS` | For email | The app's own mailbox — a Gmail address and an App Password |
@@ -47,8 +47,8 @@ your dashboard — you just don't get the daily digest.
 | `IMAP_HOST` / `IMAP_PORT` | No | Where replies are read. Defaults to Gmail. |
 | `MAIL_FROM` | No | Show a different From address than the mailbox login |
 | `REQUIRE_INVITE` | No | Defaults to `1`. Set to `0` to let anyone with the URL sign up. |
-| `LLM_PROVIDER` | No | `anthropic` or `gemini`. Only needed if both keys are set. |
-| `ANTHROPIC_MODEL` / `GEMINI_MODEL` | No | Defaults: `claude-opus-5` / `gemini-2.5-flash` |
+| `LLM_PROVIDER` | No | `anthropic`, `openai`, `xai` or `gemini`. Only needed if several keys are set. |
+| `ANTHROPIC_MODEL` / `OPENAI_MODEL` / `XAI_MODEL` / `GEMINI_MODEL` | No | Defaults: `claude-opus-5` / `gpt-5-mini` / `grok-4` / `gemini-2.5-flash` |
 | `DIGEST_HOUR` / `TIMEZONE` | No | When the daily digest runs. Defaults to 8am UTC. |
 | `DIGEST_LIMIT` | No | Jobs per digest email. Defaults to 10. |
 | `REPLY_POLL_MINUTES` | No | How often to check for replies. Defaults to 15. |
@@ -57,16 +57,31 @@ your dashboard — you just don't get the daily digest.
 
 ## Which AI Provider
 
-The app runs on **Claude or Gemini** — it uses whichever API key it finds:
+The app runs on **Claude, ChatGPT, Grok or Gemini** — it uses whichever API key it finds:
 
-- `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) → Gemini, default model `gemini-2.5-flash`
 - `ANTHROPIC_API_KEY` → Claude, default model `claude-opus-5`
+- `OPENAI_API_KEY` → ChatGPT, default model `gpt-5-mini`
+- `XAI_API_KEY` → Grok, default model `grok-4`
+- `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) → Gemini, default model `gemini-2.5-flash`
 
-If both are set, Claude is used; set `LLM_PROVIDER=gemini` to override. The startup log
-prints which provider and model are active, so you can confirm at a glance.
+If several are set, the first in that list is used; set `LLM_PROVIDER` to override. The
+startup log prints which provider and model are active, so you can confirm at a glance.
 
 If your key doesn't have access to the default model, the error message says so and tells
-you to set `GEMINI_MODEL` / `ANTHROPIC_MODEL`.
+you which `*_MODEL` variable to set.
+
+### Everyone brings their own key
+
+The key in the environment serves the **owner's account only**. Every other user is
+asked for their own key during onboarding (or can add one later in Settings), and their
+jobs are scored and their cover letters written with it. Nobody's searches ever run on
+someone else's quota.
+
+Any of the four providers works. The app reads which one off the key itself (`sk-ant-`
+is Claude, `sk-` ChatGPT, `xai-` Grok, `AIza` Gemini), so there's no dropdown to get
+wrong. Keys are checked with the provider the moment they're pasted and stored encrypted
+with `SECRET_KEY`. A user with no key sees a clear message on their dashboard instead of
+a silent failure at 8am.
 
 ## How Sign-In Works
 

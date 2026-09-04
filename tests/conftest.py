@@ -71,6 +71,7 @@ ONBOARD_ANSWERS = [
     "Senior",
     "Ada Lovelace. Ten years building analytical engines and shipping "
     "developer platforms end to end, with a focus on data tooling.",
+    "skip",                   # own AI key: the owner falls back to the server's
     "correct-horse-battery",  # password
 ]
 

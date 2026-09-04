@@ -21,8 +21,36 @@
     {% if request.query_params.get('saved') %}
     <div class="alert-success">Settings saved.</div>
     {% endif %}
+    {% if key_error %}
+    <div class="alert-error">Your other settings were saved, but the AI key wasn't: {{ key_error }}</div>
+    {% elif ai_problem %}
+    <div class="alert-warning">{{ ai_problem }}</div>
+    {% endif %}
 
     <form method="POST" action="/settings" class="settings-form">
+      <section class="settings-section">
+        <h2>Your AI key</h2>
+        <p class="section-note">
+          Every job is scored and every cover letter written with this key, so
+          the cost lands on your account and nobody else's. Gemini, Claude, ChatGPT
+          and Grok all work, and the app tells them apart from the key itself. A Gemini
+          key is free at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+          It's stored encrypted and only ever shown like this:
+        </p>
+        {% if api_key_masked %}
+        <p>Current key: <strong><code>{{ api_key_masked }}</code></strong></p>
+        {% elif user.is_owner %}
+        <p>No personal key. As the owner, your searches use the key set on the server.</p>
+        {% else %}
+        <p><strong>No key yet.</strong> Nothing can be scored until you add one.</p>
+        {% endif %}
+        <label>{{ 'Replace it' if api_key_masked else 'Add a key' }} <span class="hint">leave blank to keep things as they are</span></label>
+        <input type="password" name="llm_api_key" autocomplete="off" placeholder="AIza… / sk-ant-… / sk-… / xai-…">
+        {% if api_key_masked %}
+        <button type="submit" name="remove_api_key" value="1" class="btn-secondary">Remove my key</button>
+        {% endif %}
+      </section>
+
       <section class="settings-section">
         <h2>Job Criteria</h2>
 
