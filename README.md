@@ -94,7 +94,8 @@ Setting it up for Gmail takes about two minutes:
 1. Turn on 2-Step Verification on the Google account you want to send from
 2. Google Account → Security → **App passwords** → generate one
 3. Put the address in `SMTP_USER` and the 16-character App Password in `SMTP_PASS`
-4. Make sure IMAP is enabled (Gmail → Settings → Forwarding and POP/IMAP)
+
+IMAP is always on for personal Gmail since January 2025, so there's nothing to enable.
 
 No Google Cloud project, no OAuth consent screen, and nothing for your friends
 to approve. A regular Gmail account can send about 500 emails a day, which is

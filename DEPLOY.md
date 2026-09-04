@@ -26,14 +26,12 @@ land in this inbox and the app marks them as read.
    `abcd efgh ijkl mnop`. Copy it and delete the spaces, so you have
    `abcdefghijklmnop`. You don't pick this and you can't change it.
    **This is the only time Google shows it**, so paste it somewhere now.
-7. Turn on IMAP: in that Gmail, **Settings (gear) → See all settings →
-   Forwarding and POP/IMAP → Enable IMAP → Save Changes**.
 
 Hold on to two things: the email address, and the generated password. They go into
 two different secrets later, `SMTP_USER` and `SMTP_PASS`.
 
-> Skipping the IMAP step is the failure that's hardest to spot. Digests go out
-> fine and replies are never read, so it half works and nothing says why.
+You don't need to turn on IMAP. Google removed that setting in January 2025 and
+it's always on for personal Gmail accounts now.
 
 ---
 
@@ -140,8 +138,9 @@ works, and it's better to find out alone.
 5. You should get a second email with a cover letter and a link to apply.
 
 If the first email never arrives, `SMTP_USER` or `SMTP_PASS` is wrong. If it
-arrives but the reply gets you nothing, IMAP is off in that Gmail account. Go
-back to step 1.7.
+arrives but the reply gets you nothing after 15 minutes, check that you replied
+from the same address you signed up with. Replies are matched to your account by
+the From address, so a reply sent from a different account or alias is ignored.
 
 If the digest says no jobs were found, that's not a bug: nothing scored above
 70% today. Widen your job titles in Settings and run it again.
@@ -185,7 +184,7 @@ Read that line first. It usually names the problem outright.
 | What you see | What it is |
 |---|---|
 | No digest arrives at all | `SMTP_USER` / `SMTP_PASS` wrong, or `SMTP_PASS` is your normal Gmail password instead of the App Password |
-| Digest arrives, reply does nothing | IMAP is off in that Gmail account (step 1.7) |
+| Digest arrives, reply does nothing | You replied from a different address than you signed up with, or it's been under 15 minutes |
 | Friend's invite link 404s or goes to localhost | `BASE_URL` wrong or not set, and you need to redeploy after setting it |
 | Everyone's account vanished | `DATABASE_URL` wasn't set, so the accounts were in a file the redeploy erased. Step 3. |
 | Digests stop arriving after a quiet day | Deployed on Autoscale instead of Reserved VM. Step 5. |
