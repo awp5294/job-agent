@@ -1,5 +1,5 @@
 /* Onboarding chat UI */
-const config = window.JOB_AGENT || { totalSteps: 9, googleAvailable: false, firstPrompt: 'Hi!' };
+const config = window.JOB_AGENT || { totalSteps: 9, firstPrompt: 'Hi!' };
 const chatWindow = document.getElementById('chat-window');
 const chatInput = document.getElementById('chat-input');
 const progressFill = document.getElementById('progress-fill');
@@ -55,17 +55,11 @@ function handleAction(action) {
   if (!action) return;
   if (action === 'show_resume_upload') {
     document.getElementById('resume-upload-area').style.display = 'flex';
-  } else if (action === 'show_finish') {
+  } else if (action === 'show_password') {
     document.getElementById('resume-upload-area').style.display = 'none';
-    document.getElementById('finish-area').style.display = 'flex';
+    document.getElementById('password-area').style.display = 'flex';
     lockInput(true);
-    if (config.googleAvailable) {
-      document.getElementById('gmail-btn').style.display = 'inline-flex';
-    } else {
-      document.getElementById('finish-btn').style.display = 'inline-flex';
-      document.getElementById('finish-note').textContent =
-        'Gmail is not set up on this deployment — you will get a private sign-in link instead.';
-    }
+    document.getElementById('password-input').focus();
   } else if (action.startsWith('redirect:')) {
     setTimeout(() => { window.location.href = action.slice('redirect:'.length); }, 800);
   }
@@ -96,9 +90,8 @@ async function sendMessage() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const finished = data.action === 'show_finish';
     applyResponse(data);
-    lockInput(finished);
+    lockInput(data.action === 'show_password');
   } catch (e) {
     removeTyping();
     appendBot('Something went wrong. Please try again.');
@@ -108,30 +101,44 @@ async function sendMessage() {
   }
 }
 
-async function finishWithoutGmail() {
-  const btn = document.getElementById('finish-btn');
-  btn.disabled = true;
+async function submitPassword() {
+  const input = document.getElementById('password-input');
+  const password = input.value;
+  if (!password) return;
+
+  appendUser('••••••••');
+  input.value = '';
   showTyping();
+
   try {
-    const res = await fetch('/api/finish-signup', { method: 'POST' });
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: password }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     removeTyping();
-    if (!data.ok) {
-      appendBot(data.message || 'Could not create your account.');
-      btn.disabled = false;
+    appendBot(data.reply);
+    /* A rejected password comes back with no action — let them try again. */
+    if (!data.action) {
+      input.focus();
       return;
     }
-    appendBot('Account created. Bookmark this private sign-in link — it is how you get back in:');
-    const link = append('bubble bubble-bot signin-link', data.signin_url);
-    link.textContent = data.signin_url;
-    appendBot('Taking you to your dashboard...');
-    setTimeout(() => { window.location.href = '/dashboard'; }, 4000);
+    handleAction(data.action);
   } catch (e) {
     removeTyping();
-    appendBot('Could not create your account. Please try again.');
-    btn.disabled = false;
+    appendBot('Something went wrong creating your account. Please try again.');
+    input.focus();
   }
 }
+
+document.getElementById('password-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    submitPassword();
+  }
+});
 
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {

@@ -3,13 +3,16 @@ uvicorn[standard]==0.34.0
 jinja2==3.1.5
 python-multipart==0.0.20
 itsdangerous==2.2.0
+# Either provider works — the app uses whichever API key you set.
 anthropic==0.120.2
+google-genai==2.16.0
 httpx==0.28.1
 beautifulsoup4==4.12.3
-google-auth==2.37.0
-google-auth-oauthlib==1.2.1
-google-api-python-client==2.157.0
 apscheduler==3.11.0
+
+# Only needed when DATABASE_URL points at Postgres. Hosted deployments want it:
+# most hosts rebuild the filesystem on redeploy and a SQLite file goes with it.
+psycopg[binary]==3.2.3
 pypdf==5.1.0
 python-dotenv==1.0.1
 pydantic==2.10.5

@@ -32,7 +32,6 @@ def two_users(signed_up, browser):
     grace_browser = browser()
     grace_browser.get(f"/onboard?invite={ada['invite_token']}")
     walk_onboarding(grace_browser, email="grace@example.com")
-    grace_browser.post("/api/finish-signup")
     grace = database.get_user_by_email("grace@example.com")
 
     return {

@@ -202,3 +202,86 @@ def test_indeed_bounds_the_number_of_searches(stub_http, monkeypatch):
     indeed.fetch_indeed_jobs(["a", "b", "c", "d", "e"], ["x", "y", "z"])
     # 3 titles x 2 locations, so one slow board can't stall the whole digest.
     assert len(requested) == 6
+
+
+# ── Remotive (keyword search, no company list needed) ──────────────────────
+
+REMOTIVE_PAYLOAD = {
+    "jobs": [
+        {
+            "id": 901, "title": "Senior Product Manager", "company_name": "Zapier",
+            "url": "https://remotive.com/remote-jobs/product/senior-pm-901",
+            "candidate_required_location": "USA, Canada",
+            "salary": "$150,000 - $190,000",
+            "description": "<p>Own the automation roadmap.</p>",
+        },
+        {
+            "id": 902, "title": "Product Manager, Platform", "company_name": "Doist",
+            "url": "https://remotive.com/remote-jobs/product/pm-platform-902",
+            "candidate_required_location": "", "salary": "",
+            "description": "Own the platform.",
+        },
+        {"id": 903, "title": "No URL", "company_name": "Ghost", "url": ""},
+    ]
+}
+
+
+def test_remotive_searches_by_title_not_by_company(stub_http, monkeypatch):
+    from sourcing import remotive
+
+    requested = stub_http(remotive, FakeResponse(json_data=REMOTIVE_PAYLOAD))
+    jobs = remotive.fetch_remotive_jobs(["Product Manager"])
+
+    url, params = requested[0]
+    assert url == "https://remotive.com/api/remote-jobs"
+    assert params["search"] == "Product Manager"
+    assert len(jobs) == 2  # the one with no URL is dropped
+
+    first = jobs[0]
+    assert first["source"] == "remotive"
+    assert first["company"] == "Zapier"
+    assert first["location"] == "USA, Canada"
+    assert first["remote_type"] == "remote"
+    assert (first["salary_min"], first["salary_max"]) == (150000, 190000)
+
+
+def test_remotive_falls_back_to_remote_when_no_location_given(stub_http):
+    from sourcing import remotive
+
+    stub_http(remotive, FakeResponse(json_data=REMOTIVE_PAYLOAD))
+    jobs = remotive.fetch_remotive_jobs(["PM"])
+    assert jobs[1]["location"] == "Remote"
+    assert jobs[1]["salary_min"] is None
+
+
+def test_remotive_deduplicates_across_searches(stub_http):
+    """The same posting comes back under several search terms."""
+    from sourcing import remotive
+
+    stub_http(remotive, FakeResponse(json_data=REMOTIVE_PAYLOAD))
+    jobs = remotive.fetch_remotive_jobs(["Product Manager", "PM", "Senior PM"])
+    assert len(jobs) == 2
+    assert len({j["external_id"] for j in jobs}) == 2
+
+
+def test_remotive_bounds_how_many_searches_it_runs(stub_http):
+    from sourcing import remotive
+
+    requested = stub_http(remotive, FakeResponse(json_data={"jobs": []}))
+    remotive.fetch_remotive_jobs(["a", "b", "c", "d", "e"])
+    assert len(requested) == remotive.MAX_TITLES
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("$150,000 - $190,000", (150000, 190000)),
+    ("$120k - $160k", (120000, 160000)),
+    ("$140,000", (140000, None)),
+    ("", (None, None)),
+    ("Competitive", (None, None)),
+    ("Up to 20% bonus", (None, None)),      # percentages aren't salaries
+    ("$50/hour", (None, None)),             # nor hourly rates
+])
+def test_remotive_salary_text_is_parsed_carefully(raw, expected):
+    from sourcing.remotive import _parse_salary
+
+    assert _parse_salary(raw) == expected

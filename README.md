@@ -10,12 +10,12 @@ share it with friends and each of them runs their own search.
 ## Features
 
 - Chat-based onboarding — set your criteria in the browser
-- Daily email digest with Claude-scored matches (only ≥70% shown)
+- Daily email digest with AI-scored matches (only ≥70% shown)
 - Reply to the email with job numbers → those jobs move to Selected
-- Claude writes a tailored cover letter per job, with a stop-slop filter over the output
+- A tailored cover letter per job, checked for AI writing tells and rewritten if it has any
 - Dashboard: New Matches / Selected / Applied
 - Multi-user: share an invite link; each person gets their own account, criteria and jobs
-- Sources: Greenhouse API, Lever API, Indeed
+- Sources: Remotive (keyword search), Greenhouse API, Lever API, Indeed
 
 ## Quick Start (local)
 
@@ -25,52 +25,88 @@ cd job-agent
 python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env — add your ANTHROPIC_API_KEY and a SECRET_KEY at minimum
+# Edit .env — add GEMINI_API_KEY (or ANTHROPIC_API_KEY), SECRET_KEY, SMTP_USER, SMTP_PASS
 uvicorn server:app --reload
 ```
 
 Open http://localhost:8000 — the chat onboarding starts automatically. The first account
 created becomes the owner and doesn't need an invite.
 
-Gmail is optional to get started: without it, matches still appear on your dashboard and
-you sign in with the private link shown at the end of onboarding.
+Email is optional to get started: without a mailbox configured, matches still appear on
+your dashboard — you just don't get the daily digest.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
+| `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` | Yes | One AI key. Either provider works — see below. |
 | `SECRET_KEY` | Yes | Random string for session signing — `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `BASE_URL` | Yes | Your public URL, e.g. `https://yourapp.railway.app`. Must match the Gmail redirect URI. |
-| `GMAIL_CLIENT_ID` | For email | From Google Cloud Console |
-| `GMAIL_CLIENT_SECRET` | For email | From Google Cloud Console |
-| `SMTP_USER` / `SMTP_PASS` | Fallback | Gmail address + app password, if you'd rather not set up OAuth |
+| `BASE_URL` | Yes | Your public URL, e.g. `https://yourapp.railway.app`. Used for invite links. |
+| `SMTP_USER` / `SMTP_PASS` | For email | The app's own mailbox — a Gmail address and an App Password |
+| `SMTP_HOST` / `SMTP_PORT` | No | Defaults to Gmail (`smtp.gmail.com`, 587) |
+| `IMAP_HOST` / `IMAP_PORT` | No | Where replies are read. Defaults to Gmail. |
+| `MAIL_FROM` | No | Show a different From address than the mailbox login |
 | `REQUIRE_INVITE` | No | Defaults to `1`. Set to `0` to let anyone with the URL sign up. |
-| `ANTHROPIC_MODEL` | No | Defaults to `claude-opus-5` |
+| `LLM_PROVIDER` | No | `anthropic` or `gemini`. Only needed if both keys are set. |
+| `ANTHROPIC_MODEL` / `GEMINI_MODEL` | No | Defaults: `claude-opus-5` / `gemini-2.5-flash` |
 | `DIGEST_HOUR` / `TIMEZONE` | No | When the daily digest runs. Defaults to 8am UTC. |
 | `DIGEST_LIMIT` | No | Jobs per digest email. Defaults to 10. |
 | `REPLY_POLL_MINUTES` | No | How often to check for replies. Defaults to 15. |
-| `DB_PATH` | No | SQLite file location. Defaults to `jobagent.db`. |
+| `DATABASE_URL` | Hosted | Postgres connection string. Leave empty to use a SQLite file. Set it for any deployment — see Database. |
+| `DB_PATH` | No | SQLite file location, when `DATABASE_URL` is empty. Defaults to `jobagent.db`. |
+
+## Which AI Provider
+
+The app runs on **Claude or Gemini** — it uses whichever API key it finds:
+
+- `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) → Gemini, default model `gemini-2.5-flash`
+- `ANTHROPIC_API_KEY` → Claude, default model `claude-opus-5`
+
+If both are set, Claude is used; set `LLM_PROVIDER=gemini` to override. The startup log
+prints which provider and model are active, so you can confirm at a glance.
+
+If your key doesn't have access to the default model, the error message says so and tells
+you to set `GEMINI_MODEL` / `ANTHROPIC_MODEL`.
 
 ## How Sign-In Works
 
-There are exactly two ways into an account:
+Email and password. During onboarding each person picks a password; after that
+they sign in at `/signin`. Passwords are hashed with scrypt — the plaintext is
+never stored.
 
-1. **Sign in with Google** — the account is keyed to the email Google reports for the
-   connected mailbox, not to anything typed into the chat. This is the normal path once
-   `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` are configured.
-2. **A private sign-in link** — `/auth/token?t=…`, issued at the end of onboarding when
-   Gmail OAuth isn't configured. Treat it like a password. You can re-copy it any time
-   from Settings.
+Nobody needs a Google account, and nothing has to be approved. Typing someone
+else's email into the onboarding chat does **not** sign you in as them.
 
-Typing someone else's email address into the onboarding chat does **not** sign you in as
-them — it sends you to the sign-in page.
+Each account also gets an emergency sign-in link (`/auth/token?t=…`) on its
+Settings page, for when someone forgets their password. Treat it like a password.
+
+## How Email Works
+
+**The app owns one mailbox. Your friends don't connect anything.**
+
+You set `SMTP_USER` and `SMTP_PASS` once. Every digest is sent from that address
+to whatever email each person entered during onboarding, and every reply comes
+back to that same inbox, where the app matches it to an account by the address it
+came from.
+
+Setting it up for Gmail takes about two minutes:
+
+1. Turn on 2-Step Verification on the Google account you want to send from
+2. Google Account → Security → **App passwords** → generate one
+3. Put the address in `SMTP_USER` and the 16-character App Password in `SMTP_PASS`
+
+IMAP is always on for personal Gmail since January 2025, so there's nothing to enable.
+
+No Google Cloud project, no OAuth consent screen, and nothing for your friends
+to approve. A regular Gmail account can send about 500 emails a day, which is
+plenty for a group of friends on one digest each.
 
 ## Sharing With Friends
 
 1. Go to **Settings** → copy your invite link (`/onboard?invite=…`) → send it to a friend.
-2. They open it, go through onboarding with their own criteria, resume and Gmail, and get
-   their own dashboard.
+2. They open it, answer the chat with their own criteria and resume, pick a password, and
+   get their own dashboard. That's the whole sign-up — no Google account, no approval
+   step, nothing to install.
 3. Everyone gets their own invite link, so they can pass it on.
 
 Sign-up requires an invite link by default (`REQUIRE_INVITE=1`), so the URL is safe to
@@ -78,17 +114,36 @@ leave public — the only exception is the very first account, which bootstraps 
 Each user's jobs, criteria, resume and cover letters are private to them; the API refuses
 any request for a row that belongs to someone else.
 
-## Gmail Setup (one-time, ~10 min)
+## Deploy to Replit
 
-1. Go to https://console.cloud.google.com and create a project
-2. Enable the **Gmail API** (APIs & Services → Enable APIs)
-3. **Credentials** → Create → OAuth 2.0 Client ID → Web Application
-4. Add `{BASE_URL}/auth/gmail/callback` as an authorized redirect URI
-5. Copy the Client ID and Secret into your `.env`
-6. **OAuth consent screen** → add each user's email as a test user
+If you haven't done this before, **[DEPLOY.md](DEPLOY.md) walks through every
+click**, including making the mailbox and testing it on yourself before you
+invite anyone. The short version:
 
-Scopes requested: `gmail.send` (to send your digest) and `gmail.readonly` (to read your
-replies and confirm your address).
+1. Import this repo into Replit.
+2. Tools → **Database** → create one. Replit sets `DATABASE_URL` itself, so
+   there's nothing to copy. Do this before anything else; see below for why.
+3. Add these to **Secrets** (the padlock in the sidebar), not to a `.env` file:
+   `GEMINI_API_KEY`, `SECRET_KEY`, `SMTP_USER`, `SMTP_PASS`. Generate the secret
+   key with `python -c "import secrets; print(secrets.token_hex(32))"`.
+4. Deploy as a **Reserved VM**. Autoscale is the default and it is the wrong
+   choice here: it sleeps when nobody is browsing, and a sleeping process sends
+   no morning digest and never checks for replies. `.replit` already asks for a
+   Reserved VM, but the deploy screen lets you override it, so check.
+5. Copy the deployment URL into a `BASE_URL` secret and redeploy. Invite links
+   are built from it, so until it's set they point at localhost.
+6. Open the URL. The first account you create becomes the owner.
+
+The console prints what's still missing on every boot. If a key is absent it
+names the key and says what breaks, so read that line before assuming the deploy
+worked.
+
+**Why Postgres and not the SQLite file.** Replit rebuilds the container's
+filesystem when you redeploy, which deletes the SQLite file and every account,
+resume and saved job in it. You would not notice until a friend tried to sign in
+after your next push. Set `DATABASE_URL` and the data lives outside the
+container instead. Same code either way: leave `DATABASE_URL` empty locally and
+it falls back to SQLite with no setup.
 
 ## Deploy to Railway
 
@@ -96,42 +151,100 @@ replies and confirm your address).
 2. https://railway.app → New Project → Deploy from GitHub → select your repo
 3. Add the environment variables above
 4. Set `BASE_URL` to your Railway URL
-5. Update the Gmail OAuth redirect URI in Google Cloud Console to match
 
-Note: SQLite lives on the container's disk. On a host with an ephemeral filesystem, point
-`DB_PATH` at a mounted volume or your accounts will disappear on redeploy.
+Add a Postgres database and set `DATABASE_URL`, or attach a volume and point `DB_PATH` at
+it. Railway rebuilds the container on deploy, so a SQLite file on the container's own disk
+takes every account with it.
+
+## Database
+
+Two backends, one set of code. `DATABASE_URL` decides which:
+
+| `DATABASE_URL` | Backend | Use it for |
+|---|---|---|
+| empty | SQLite file at `DB_PATH` | local development, no setup |
+| a Postgres URL | Postgres | anything hosted |
+
+The SQL is written once in SQLite's dialect and translated in `db/connection.py`,
+which handles the three things that actually differ: placeholders, auto-incrementing
+ids, and how you ask what columns a table has. The schema is translated from
+`db/schema.sql` rather than duplicated, so the backends can't drift apart.
+
+To run the tests against Postgres:
+
+```bash
+DATABASE_URL=postgresql://user:pass@host/db pytest
+```
 
 ## Job Sources
 
-**Greenhouse & Lever** — new accounts are pre-filled with a list of well-known companies,
-so a friend gets real matches from onboarding alone. Anyone can edit the list in
+**Remotive** — searched by your job titles, across thousands of companies at once.
+This is what gives a brand-new account real matches without naming any company.
+Remote roles only. Public API, no key.
+
+**Greenhouse & Lever** — these answer "what is company X hiring for?", so they need a
+company list. New accounts are pre-filled with well-known companies; edit the list in
 Settings. A slug is the company's identifier in its job board URL:
 
 - `https://boards.greenhouse.io/stripe` → slug is `stripe`
 - `https://jobs.lever.co/vercel` → slug is `vercel`
 
-If a company in the default list has moved off that board, it just contributes no jobs
-and the digest notes it — it doesn't break the run.
+If a company in the default list has moved off that board, it contributes no jobs and
+the digest notes it — it doesn't break the run.
 
-**Indeed** — searched automatically from your job titles and locations. Indeed actively
-blocks scrapers, so it often returns nothing; the digest reports that as a note rather
-than failing. Greenhouse and Lever are the reliable sources.
+**Indeed** — searched from your titles and locations, but Indeed actively blocks
+scrapers, so it usually returns nothing. Treat anything it finds as a bonus.
+
+### Why not LinkedIn
+
+LinkedIn has no public jobs API, requires a logged-in session to see postings, and its
+terms prohibit scraping. Doing it anyway means running a logged-in account against
+their anti-bot systems — which gets the account restricted or banned, and it would be
+*your* account, since there's no other way to authenticate. That risk lands on a real
+person's professional profile, so this app doesn't do it.
+
+The sources above cover the same ground for the companies that matter: nearly every
+startup and tech company posts to Greenhouse, Lever, or Ashby, and Remotive aggregates
+remote roles across all of them. Adding a company slug in Settings gets you that
+company's full posting list, straight from the source and always current.
 
 ## How It Works
 
 1. **Daily at `DIGEST_HOUR`** — fetch jobs from every configured source, score each
-   against your criteria with Claude, and keep the ones scoring ≥70%
+   against your criteria, and keep the ones scoring ≥70%
 2. **Email digest** — the top `DIGEST_LIMIT` (default 10) matches, numbered, to your
    inbox. Anything below the cut stays queued for the next digest.
 3. **You reply** — `1, 3, 5`. Quoted text is ignored, so the digest's own numbers aren't
    read back as selections.
-4. **The agent picks it up within `REPLY_POLL_MINUTES`** (default 15), writes a tailored
-   cover letter for each job you picked, and emails them back to you with a direct
-   apply link per job.
+4. **The agent reads the reply within `REPLY_POLL_MINUTES`** (default 15) from its own
+   inbox, matches it to your account by your email address, writes a tailored cover
+   letter for each job you picked, and emails them back with a direct apply link.
 5. **You tap the link and submit.** Everything is also on the dashboard if you'd rather
    edit a letter first.
 
 You can also hit **Run digest** on the dashboard to do all of this on demand.
+
+### Keeping the cover letters human
+
+An employer can spot a machine-written cover letter, so three things guard against it:
+
+1. **The prompt** names the patterns to avoid rather than handing over a banned-word
+   list: no stock openers, active voice, a concrete detail behind every claim, varied
+   sentence length, no em dashes.
+2. **A check** scans the draft for the tells that survived, by category: stock openers
+   and closers, buzzwords, filler adverbs, em dashes, "not just X, but Y", vague claims
+   like "significant impact" with no number attached.
+3. **One rewrite**, quoting those specific tells back at the model and telling it to keep
+   every fact and number as-is. If the rewrite isn't cleaner, the first draft is kept.
+
+What it deliberately does **not** do is edit letters with find-and-replace. An earlier
+version deleted any sentence containing a stock phrase, which threw away "Throughout my
+career I shipped 12 products at Stripe" along with the cliche, and rewrote "dynamic
+pricing engine" as "strong pricing engine". These letters go to employers, so a mangled
+sentence is worse than a slightly stiff one. Only wrappers get stripped mechanically:
+salutations, sign-offs, markdown fences.
+
+The same rules apply to the one-line "Why:" reason in the digest.
 
 ### What "auto apply" does and doesn't do
 
@@ -150,20 +263,22 @@ pytest
 ```
 
 The suite covers onboarding, sign-in and the invite gate, cross-account isolation, the
-digest pipeline, reply parsing, and job-board parsing. The Anthropic API and the job
-boards are stubbed, so no network access or API key is needed.
+digest pipeline, reply parsing, job-board parsing, and both AI providers. Every network
+call is stubbed, so no internet access or API key is needed.
 
 ## Project Layout
 
 ```
 server.py              FastAPI routes, sessions, onboarding, digest orchestration
-llm.py                 Anthropic client, model config, error handling
+llm.py                 Claude/Gemini client, model config, error handling
+auth.py                Password hashing (scrypt, standard library)
 db/database.py         SQLite data layer (all queries live here)
 db/schema.sql          Schema + additive migrations
 matching/scorer.py     Scores a job against a user's criteria
 apply/cover_letter.py  Cover letter generation + stop-slop filter
 apply/browser.py       Optional Playwright form pre-filler (not used by the web app)
-email_handler/gmail.py OAuth, digest send, reply parsing
+email_handler/mailbox.py  The app's mailbox: SMTP send, IMAP reply reading
+email_handler/digest.py   Email rendering
 sourcing/              Greenhouse, Lever, Indeed
 templates/ static/     UI
 ```

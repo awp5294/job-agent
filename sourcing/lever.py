@@ -1,7 +1,9 @@
 """Lever public postings API. No auth required."""
+import os
+
 import httpx
 
-BASE = "https://api.lever.co/v0/postings/{slug}?mode=json"
+BASE = os.getenv("LEVER_API_BASE", "https://api.lever.co/v0/postings/{slug}?mode=json")
 
 
 def parse_job(job: dict, company_slug: str) -> dict:
