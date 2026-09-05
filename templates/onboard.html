@@ -85,6 +85,8 @@
       firstPrompt: {{ first_prompt | tojson }}
     };
     function startOnboarding() {
+      /* Remember the dismissal server-side, so a refresh doesn't bring it back. */
+      fetch('/api/intro-seen', { method: 'POST' }).catch(() => {});
       document.getElementById('intro').hidden = true;
       document.getElementById('progress').hidden = false;
       document.getElementById('chat-area').hidden = false;

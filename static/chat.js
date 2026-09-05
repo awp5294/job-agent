@@ -180,6 +180,16 @@ document.getElementById('resume-file').addEventListener('change', async (e) => {
   }
 });
 
-/* Start the conversation. */
-updateProgress(0);
-appendBot(config.firstPrompt);
+/* Start, or resume, the conversation. The server knows which question this
+   session is on; opening on the first one regardless filed people's names
+   under "job titles" after a refresh. */
+(async () => {
+  updateProgress(0);
+  try {
+    const res = await fetch('/api/chat/state');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    applyResponse(await res.json());
+  } catch (e) {
+    appendBot(config.firstPrompt);
+  }
+})();
