@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Agent — How it works</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="about-page">
+  <nav class="nav">
+    <div class="nav-brand">⚡ Job Agent</div>
+    <div class="nav-user">
+      {% if user %}
+      <a href="/dashboard" class="nav-link">← Dashboard</a>
+      <a href="/settings" class="nav-link">Settings</a>
+      {% else %}
+      <a href="/signin" class="nav-link">Sign in</a>
+      {% endif %}
+    </div>
+  </nav>
+
+  <div class="about-container">
+    {% include "_about_content.html" %}
+
+    {% if not user %}
+    <div class="intro-cta">
+      <a href="/onboard" class="btn-primary">Get started</a>
+      <p class="section-note">Sign-up needs an invite link from someone who already uses it. If a friend sent you here, use their link.</p>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

@@ -1,0 +1,90 @@
+{# What the app is, for someone who just clicked a friend's link.
+   Included by onboard.html (before the chat) and about.html (any time later). #}
+<div class="intro">
+  <h1>A job search that runs from your inbox</h1>
+  <p class="intro-lead">
+    Every morning this agent pulls fresh postings from job boards, scores each
+    one against what you told it you want, and emails you the ten best. You
+    reply to that email with the numbers of the ones you like. Within fifteen
+    minutes it emails back a cover letter for each, written from your resume,
+    with a link to the application. You paste the letter in and submit.
+  </p>
+  <p>
+    Setup takes about five minutes and is the only time you type anything here.
+    After that it runs from your inbox.
+  </p>
+
+  <section class="intro-section">
+    <h2>Why it asks what it asks</h2>
+    <p class="section-note">Each question feeds one part of that loop. It doesn't collect anything it doesn't use.</p>
+    <dl class="intro-questions">
+      <dt>Your name</dt>
+      <dd>How the emails address you.</dd>
+      <dt>Your email</dt>
+      <dd>Where the digest goes. Replies are matched to your account by the address
+          they come from, so reply from this one.
+          {% if mail_ready %}The emails come from <strong>{{ mailbox_address }}</strong>;
+          add it to your contacts so the first one doesn't land in spam.{% endif %}</dd>
+      <dt>Job titles</dt>
+      <dd>The search terms. "Product Manager, Senior PM" finds both.</dd>
+      <dt>Locations and remote preference</dt>
+      <dd>Filters out postings you couldn't take.</dd>
+      <dt>Salary range</dt>
+      <dd>Postings under your floor score lower and drop out of the digest.</dd>
+      <dt>Seniority</dt>
+      <dd>A director-level posting scores poorly for someone asking for mid-level, and the other way round.</dd>
+      <dt>Your resume</dt>
+      <dd>Cover letters are written from it. If something isn't in your resume, it isn't in the letter.</dd>
+      <dt>An AI key</dt>
+      <dd>Whose account pays for the scoring and writing. Yours. More on this below.</dd>
+      <dt>A password</dt>
+      <dd>So you can sign back in.</dd>
+    </dl>
+  </section>
+
+  <div class="intro-columns">
+    <section class="intro-section">
+      <h2>What it does</h2>
+      <ul>
+        <li>Searches the Remotive, Greenhouse and Lever job boards every morning, and Indeed when Indeed allows it.</li>
+        <li>Scores each posting from 0 to 100 against your criteria, with a one-line reason you can read in the email.</li>
+        <li>Emails the ten best. Anything else that scored well waits for tomorrow, so nothing is lost.</li>
+        <li>Writes one cover letter per job you pick, then checks it for the tells of machine writing and rewrites once if it finds any.</li>
+        <li>Keeps a dashboard of everything: new matches, the ones you picked, the ones you've applied to. You can edit any letter there before you use it.</li>
+      </ul>
+    </section>
+
+    <section class="intro-section">
+      <h2>What it doesn't do</h2>
+      <ul>
+        <li><strong>It doesn't submit applications for you.</strong> You paste the letter and click submit. Every employer's form is different, and a form filled in wrong costs you the job.</li>
+        <li><strong>It doesn't search LinkedIn.</strong> LinkedIn has no public job API and blocks scraping. Running one against your login would put your account at risk.</li>
+        <li><strong>It doesn't act without you.</strong> Nothing is selected or written until you reply.</li>
+        <li><strong>It doesn't email anyone but you.</strong> No employer hears from this app.</li>
+        <li><strong>It doesn't share your data between users.</strong> Your jobs, resume and letters are yours alone. The person running this copy can, in principle, read the database, as with any app a friend hosts for you. Your AI key is the exception: it's stored encrypted, so even they can't read it.</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="intro-section intro-key">
+    <h2>About the AI key</h2>
+    <p>
+      Scoring hundreds of postings and writing letters uses an AI model, and AI
+      models are paid for per use. Rather than one person paying for everyone,
+      each account uses its own key, so the cost lands where the benefit does.
+    </p>
+    <ul>
+      <li><strong>Which kind.</strong> Gemini, Claude, ChatGPT or Grok. Paste whichever you have; the app can tell which from the key itself.</li>
+      <li><strong>Don't have one?</strong> A Gemini key is free to create at
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
+          and takes about a minute. Light use stays inside Google's free tier; heavier use costs cents a day.</li>
+      <li><strong>How it's stored.</strong> Encrypted. It's shown back to you only as its first and last four characters, and you can replace or remove it in Settings at any time.</li>
+      <li><strong>If you skip it.</strong> You can still finish signing up. Nothing can be scored until you add one in Settings, and your dashboard will say so.</li>
+    </ul>
+  </section>
+
+  <section class="intro-section">
+    <h2>Have ready</h2>
+    <p>Your resume, as a PDF or text you can paste, and your AI key if you have one.</p>
+  </section>
+</div>
