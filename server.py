@@ -215,7 +215,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Job Agent", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 # ── Cache-busting for static files ─────────────────────────────────────────
@@ -250,7 +249,14 @@ def static(path: str) -> str:
     return f"/static/{path}?v={_asset_hash(path)}"
 
 
-templates.env.globals["static"] = static
+# Register `static` through the constructor's context_processors rather than by
+# mutating templates.env afterwards. Both work, but a processor is injected into
+# every render by contract, so the template can't fall back to "undefined" if a
+# stale process is serving a newer template than the code that built it.
+templates = Jinja2Templates(
+    directory=BASE_DIR / "templates",
+    context_processors=[lambda request: {"static": static}],
+)
 
 
 # ── Sessions ───────────────────────────────────────────────────────────────
