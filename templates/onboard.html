@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Job Agent — Get Started</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="{{ static('style.css') }}">
 </head>
 <body class="onboard-page">
   <div class="onboard-container{% if show_intro %} onboard-wide{% endif %}" id="onboard-container">
@@ -94,7 +94,7 @@
       document.getElementById('chat-input').focus();
     }
   </script>
-  <script src="/static/chat.js"></script>
+  <script src="{{ static('chat.js') }}"></script>
   {% endif %}
 </body>
 </html>

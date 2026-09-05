@@ -133,3 +133,29 @@ def test_a_reload_after_finishing_points_at_the_dashboard(signed_up):
     """The signed-up fixture's session has walked every step."""
     state = signed_up.get("/api/chat/state").json()
     assert state["action"] == "redirect:/dashboard"
+
+
+# ── Static assets carry a content hash, so a deploy busts the cache ─────────
+
+def test_static_links_carry_a_version(client):
+    """A returning browser must not run yesterday's chat.js after a deploy."""
+    import re
+    page = client.get("/onboard").text
+    for asset in ("style.css", "chat.js"):
+        match = re.search(rf"/static/{re.escape(asset)}\?v=([0-9a-f]+)", page)
+        assert match, f"{asset} has no ?v= hash"
+        assert len(match.group(1)) >= 6
+
+
+def test_the_version_changes_when_the_file_changes(tmp_path, monkeypatch):
+    import server
+    css = server.BASE_DIR / "static" / "style.css"
+    before = server.static("style.css")
+    original = css.read_bytes()
+    try:
+        css.write_bytes(original + b"\n/* touched */\n")
+        after = server.static("style.css")
+    finally:
+        css.write_bytes(original)
+    assert before != after, "editing the file must change its ?v="
+    assert server.static("style.css") == before, "reverting restores the hash"

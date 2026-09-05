@@ -218,6 +218,41 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
+# ── Cache-busting for static files ─────────────────────────────────────────
+# Browsers cache /static/chat.js and style.css hard. Without a version marker,
+# a visitor who loaded the page once keeps running yesterday's JavaScript after
+# a deploy — which is how a fixed onboarding bug still shows up for them. A
+# short content hash in the URL means a changed file is a new URL, fetched
+# fresh, while an unchanged file stays cached.
+
+import hashlib as _hashlib
+
+_asset_hashes: dict[str, tuple[float, str]] = {}
+
+
+def _asset_hash(path: str) -> str:
+    """Content hash of a static file, recomputed only when the file changes."""
+    full = BASE_DIR / "static" / path
+    try:
+        mtime = full.stat().st_mtime
+    except OSError:
+        return "0"
+    cached = _asset_hashes.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    digest = _hashlib.sha1(full.read_bytes()).hexdigest()[:8]
+    _asset_hashes[path] = (mtime, digest)
+    return digest
+
+
+def static(path: str) -> str:
+    """URL for a static file, tagged with its content hash: /static/x.js?v=abc."""
+    return f"/static/{path}?v={_asset_hash(path)}"
+
+
+templates.env.globals["static"] = static
+
+
 # ── Sessions ───────────────────────────────────────────────────────────────
 
 def set_session_cookie(response: Response, session_id: str):

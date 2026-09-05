@@ -11,7 +11,7 @@ def test_onboard_page_actually_renders_its_body(client):
     body = response.text
     assert len(body) > 500
     assert "chat-window" in body
-    assert 'src="/static/chat.js"' in body
+    assert "/static/chat.js?v=" in body   # cache-busted, still present
     assert response.headers["content-length"] == str(len(response.content))
 
 
