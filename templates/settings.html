@@ -30,6 +30,29 @@
 
     <form method="POST" action="/settings" class="settings-form">
       <section class="settings-section">
+        <h2>About you</h2>
+        <label>Name <span class="hint">how the emails greet you</span></label>
+        <input type="text" name="name" value="{{ user.name }}">
+
+        <label>Email <span class="hint">where the digest goes; reply from this address</span></label>
+        <input type="email" name="email" value="{{ user.email }}">
+        <p class="section-note">
+          Change this and your next digest goes to the new address. Replies are
+          matched by the address they come from, so reply from whichever email is
+          set here.
+        </p>
+
+        <label>Resume <span class="hint">cover letters are written from this</span></label>
+        <textarea name="resume_text" rows="8" class="resume-box" placeholder="Paste your resume text…">{{ resume_text }}</textarea>
+        <div class="resume-upload-row">
+          <label class="btn-secondary file-btn">
+            Replace from PDF<input type="file" id="resume-file" accept=".pdf,.txt" hidden>
+          </label>
+          <span id="resume-msg" class="section-note"></span>
+        </div>
+      </section>
+
+      <section class="settings-section">
         <h2>Your AI key</h2>
         <p class="section-note">
           Every job is scored and every cover letter written with this key, so
@@ -185,6 +208,23 @@
         document.getElementById('new-password').value = '';
       }
     }
+
+    document.getElementById('resume-file').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const msg = document.getElementById('resume-msg');
+      msg.textContent = 'Reading ' + file.name + '…';
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res = await fetch('/api/resume-update', { method: 'POST', body: form });
+        const data = await res.json();
+        msg.textContent = data.message || (data.ok ? 'Updated.' : 'Could not read that file.');
+        if (data.ok) location.reload();   /* pull the new text into the box */
+      } catch (err) {
+        msg.textContent = 'Upload failed. Paste the text instead.';
+      }
+    });
 
     function revealField(id, btn) {
       const el = document.getElementById(id);
