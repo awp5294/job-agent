@@ -119,10 +119,13 @@ plenty for a group of friends on one digest each.
 ## Sharing With Friends
 
 1. Go to **Settings** → copy your invite link (`/onboard?invite=…`) → send it to a friend.
-2. They open it, answer the chat with their own criteria and resume, pick a password, and
-   get their own dashboard. That's the whole sign-up — no Google account, no approval
+2. The link opens on a page that explains what the app does, why it asks each question,
+   what it won't do (submit forms, search LinkedIn, email anyone but them), and why it
+   wants their own AI key. The same page is at `/about` for later.
+3. They click Start, answer the chat with their own criteria and resume, pick a password,
+   and get their own dashboard. That's the whole sign-up — no Google account, no approval
    step, nothing to install.
-3. Everyone gets their own invite link, so they can pass it on.
+4. Everyone gets their own invite link, so they can pass it on.
 
 Sign-up requires an invite link by default (`REQUIRE_INVITE=1`), so the URL is safe to
 leave public — the only exception is the very first account, which bootstraps the owner.

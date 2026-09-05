@@ -338,7 +338,11 @@ async def onboard_page(request: Request, invite: Optional[str] = None):
             "total_steps": TOTAL_STEPS,
             "first_prompt": ONBOARD_STEPS[0]["prompt"],
             "mail_ready": mailbox_configured(),
+            "mailbox_address": mailbox_address(),
             "signup_blocked": None if allowed else reason,
+            # The explainer shows until the first answer; after that a refresh
+            # drops them straight back into the chat where they left off.
+            "show_intro": state.get("step_num", 0) == 0,
         },
     )
     # Set the cookie on the template response directly. Copying headers across
@@ -346,6 +350,20 @@ async def onboard_page(request: Request, invite: Optional[str] = None):
     # truncates the page to nothing.
     set_session_cookie(response, sid)
     return response
+
+
+@app.get("/about", response_class=HTMLResponse)
+async def about_page(request: Request):
+    """What the app does and doesn't do. Readable signed in or out."""
+    return templates.TemplateResponse(
+        request,
+        "about.html",
+        {
+            "user": get_current_user(request),
+            "mail_ready": mailbox_configured(),
+            "mailbox_address": mailbox_address(),
+        },
+    )
 
 
 @app.get("/signin", response_class=HTMLResponse)

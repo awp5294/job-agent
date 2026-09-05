@@ -1,0 +1,79 @@
+"""The explainer a friend sees before the first question, and can re-read later."""
+import server
+from tests.conftest import ONBOARD_ANSWERS
+
+# Claims the page has to make. If one of these disappears, a friend signs up
+# without knowing what they agreed to.
+PROMISES = [
+    "doesn't submit applications",
+    "doesn't search LinkedIn",
+    "doesn't email anyone but you",
+    "doesn't share your data",
+    "About the AI key",
+    "aistudio.google.com/apikey",
+    "stored encrypted",
+    "Why it asks what it asks",
+]
+
+
+def test_about_is_readable_without_an_account(client):
+    page = client.get("/about")
+    assert page.status_code == 200
+    for promise in PROMISES:
+        assert promise in page.text, promise
+    assert "Get started" in page.text
+    assert "Sign in" in page.text
+
+
+def test_about_for_a_signed_in_user_links_back_not_forward(signed_up):
+    page = signed_up.get("/about").text
+    assert "Dashboard" in page
+    assert "Get started" not in page
+
+
+def test_the_invite_link_lands_on_the_explainer(client):
+    page = client.get("/onboard").text
+    assert 'id="intro"' in page
+    assert 'id="start-btn"' in page
+    for promise in PROMISES:
+        assert promise in page, promise
+    # The chat is on the page, just hidden until Start.
+    assert 'id="chat-area" hidden' in page
+
+
+def test_the_explainer_names_the_sending_address(client, monkeypatch):
+    monkeypatch.setattr(server, "mailbox_configured", lambda: True)
+    monkeypatch.setattr(server, "mailbox_address", lambda: "jobhunter@example.com")
+    page = client.get("/onboard").text
+    assert "jobhunter@example.com" in page
+    assert "add it to your contacts" in page
+
+
+def test_a_refresh_mid_chat_goes_back_to_the_chat_not_the_explainer(client):
+    client.post("/api/chat", json={"message": ONBOARD_ANSWERS[0]})
+    page = client.get("/onboard").text
+    assert 'id="intro"' not in page
+    assert 'id="chat-area" hidden' not in page
+    assert "How this works" in page   # still one click away
+
+
+def test_a_blocked_signup_still_gets_the_explainer_but_no_start(signed_up, browser):
+    """Someone without an invite can read what it is; they just can't begin."""
+    stranger = browser()
+    page = stranger.get("/onboard").text
+    assert "Why it asks what it asks" in page
+    assert "invite" in page.lower()
+    assert 'id="start-btn"' not in page
+
+
+def test_dashboard_and_settings_link_to_it(signed_up):
+    assert 'href="/about"' in signed_up.get("/dashboard").text
+    assert 'href="/about"' in signed_up.get("/settings").text
+
+
+def test_the_explainer_keeps_to_plain_prose(client):
+    """The writing rules the rest of the app holds to."""
+    text = client.get("/about").text
+    assert "—" not in text.split("<body")[1], "em dash in the explainer"
+    for tell in ("leverage", "seamless", "robust", "empower", "streamline", "delve"):
+        assert tell not in text.lower(), tell
