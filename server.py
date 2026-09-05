@@ -660,13 +660,8 @@ def _next_prompt(state: dict) -> tuple[str, int, str | None]:
     return step["prompt"].format(**state.get("data", {})), step_num, None
 
 
-@app.post("/api/resume-upload")
-async def resume_upload(request: Request, file: UploadFile = File(...)):
-    sid = ensure_session(request)
-    state = get_session_state(sid)
-    data = state.setdefault("data", {})
-
-    content = await file.read()
+def extract_resume_text(content: bytes) -> str:
+    """Resume text from an uploaded file, PDF or plain text. Capped at 8000 chars."""
     try:
         import io
 
@@ -675,8 +670,17 @@ async def resume_upload(request: Request, file: UploadFile = File(...)):
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
     except Exception:
         text = content.decode("utf-8", errors="ignore")
+    return text[:8000]
 
-    data["resume_text"] = text[:8000]
+
+@app.post("/api/resume-upload")
+async def resume_upload(request: Request, file: UploadFile = File(...)):
+    sid = ensure_session(request)
+    state = get_session_state(sid)
+    data = state.setdefault("data", {})
+
+    text = extract_resume_text(await file.read())
+    data["resume_text"] = text
     # The upload IS the answer to the resume question, wherever they were, so
     # move straight on to the step after it.
     state["step_num"] = STEP_INDEX["resume"] + 1
@@ -709,6 +713,20 @@ async def api_signin(request: Request):
     response = JSONResponse({"ok": True})
     sign_in(response, sid, user["id"])
     return response
+
+
+@app.post("/api/resume-update")
+async def api_resume_update(request: Request, file: UploadFile = File(...)):
+    """Replace a signed-in user's resume from a new PDF or text file."""
+    user = require_user(request)
+    text = extract_resume_text(await file.read())
+    if len(text.strip()) < 30:
+        return JSONResponse(
+            {"ok": False, "message": "That file had almost no text. Paste it instead?"},
+            status_code=400)
+    update_user(user["id"], {"resume_text": text})
+    return JSONResponse({"ok": True, "words": len(text.split()),
+                         "message": f"Resume updated — {len(text.split())} words."})
 
 
 @app.post("/api/change-password")
@@ -787,6 +805,7 @@ async def settings_get(request: Request):
         {
             "user": user,
             "criteria": get_criteria(user["id"]) or {},
+            "resume_text": user.get("resume_text") or "",
             "api_key_masked": api_key_masked,
             "ai_problem": ai_problem(user),
             "key_error": request.query_params.get("key_error"),
@@ -823,6 +842,32 @@ async def settings_post(request: Request):
         "greenhouse_companies": csv("greenhouse_companies"),
         "lever_companies": csv("lever_companies"),
     })
+
+    # Name and resume: overwrite when the field is present and non-empty.
+    fields: dict = {}
+    if (name := (form.get("name") or "").strip()):
+        fields["name"] = name
+    if (resume := (form.get("resume_text") or "").strip()):
+        fields["resume_text"] = resume[:8000]
+    if fields:
+        update_user(user["id"], fields)
+
+    # Email decides where the digest goes and which replies map to this account,
+    # so a change has to stay unique. Taking an address another account owns
+    # would hijack their replies.
+    new_email = (form.get("email") or "").strip().lower()
+    if new_email and new_email != (user.get("email") or "").lower():
+        from urllib.parse import quote
+        if "@" not in new_email or "." not in new_email.split("@")[-1]:
+            return RedirectResponse(
+                f"/settings?key_error={quote('That email address does not look valid.')}",
+                status_code=303)
+        existing = get_user_by_email(new_email)
+        if existing and existing["id"] != user["id"]:
+            return RedirectResponse(
+                f"/settings?key_error={quote('Another account already uses that email.')}",
+                status_code=303)
+        update_user(user["id"], {"email": new_email})
 
     # The key field is blank on every normal save; only act on it when it isn't.
     new_key = (form.get("llm_api_key") or "").strip()

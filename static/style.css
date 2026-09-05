@@ -402,3 +402,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .intro-cta { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 24px; }
 .intro-cta .btn-primary { padding: 12px 28px; font-size: 15px; display: inline-block; text-decoration: none; }
 .intro-section p + ul { margin-top: 10px; }
+
+/* ── Settings: resume box ────────────────────────────────────────────────────── */
+.resume-box { width: 100%; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); resize: vertical; line-height: 1.5; }
+.resume-upload-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.file-btn { cursor: pointer; display: inline-block; }
