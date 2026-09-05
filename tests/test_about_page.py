@@ -77,3 +77,59 @@ def test_the_explainer_keeps_to_plain_prose(client):
     assert "—" not in text.split("<body")[1], "em dash in the explainer"
     for tell in ("leverage", "seamless", "robust", "empower", "streamline", "delve"):
         assert tell not in text.lower(), tell
+
+
+# ── The explainer is gated on having seen it, not on progress ──────────────
+
+def test_a_half_finished_session_from_before_still_gets_the_explainer(client):
+    """Progress without the seen-flag is what a session from before this page
+    looks like. They never read it, so show it once."""
+    import server
+    from db import database
+    client.get("/onboard")
+    sid = server.signer.loads(client.cookies["session"])
+    database.set_session_state(sid, {"step_num": 3, "data": {"name": "Ada"}})
+
+    page = client.get("/onboard").text
+    assert 'id="intro"' in page
+
+
+def test_start_dismisses_the_explainer_for_good(client):
+    client.get("/onboard")
+    assert client.post("/api/intro-seen").json() == {"ok": True}
+    page = client.get("/onboard").text
+    assert 'id="intro"' not in page
+    assert 'id="chat-area" hidden' not in page
+
+
+# ── A reload resumes the question the server is actually on ────────────────
+
+def test_a_fresh_session_starts_at_the_first_question(client):
+    state = client.get("/api/chat/state").json()
+    assert state["step_num"] == 0
+    assert "name" in state["reply"].lower()
+    assert state["action"] is None
+
+
+def test_a_reload_mid_chat_resumes_where_the_server_is(client):
+    for answer in ONBOARD_ANSWERS[:2]:
+        client.post("/api/chat", json={"message": answer})
+    state = client.get("/api/chat/state").json()
+    assert state["step_num"] == 2
+    assert "job titles" in state["reply"].lower()
+    # The greeting-by-name prompt was already shown; this one carries no name.
+    assert "{name}" not in state["reply"]
+
+
+def test_a_reload_on_the_key_step_brings_back_the_masked_box(client):
+    for answer in ONBOARD_ANSWERS[:8]:
+        client.post("/api/chat", json={"message": answer})
+    state = client.get("/api/chat/state").json()
+    assert state["action"] == "show_secret"
+    assert "API key" in state["reply"]
+
+
+def test_a_reload_after_finishing_points_at_the_dashboard(signed_up):
+    """The signed-up fixture's session has walked every step."""
+    state = signed_up.get("/api/chat/state").json()
+    assert state["action"] == "redirect:/dashboard"

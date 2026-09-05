@@ -340,9 +340,9 @@ async def onboard_page(request: Request, invite: Optional[str] = None):
             "mail_ready": mailbox_configured(),
             "mailbox_address": mailbox_address(),
             "signup_blocked": None if allowed else reason,
-            # The explainer shows until the first answer; after that a refresh
-            # drops them straight back into the chat where they left off.
-            "show_intro": state.get("step_num", 0) == 0,
+            # The explainer shows until they've dismissed it (or answered
+            # something, which counts). A refresh mid-chat lands back in the chat.
+            "show_intro": not state.get("intro_seen"),
         },
     )
     # Set the cookie on the template response directly. Copying headers across
@@ -383,6 +383,36 @@ async def signin_page(request: Request, error: Optional[str] = None):
     )
     set_session_cookie(response, sid)
     return response
+
+
+@app.post("/api/intro-seen")
+async def intro_seen(request: Request):
+    """The Start button on the explainer. Remembered per session."""
+    sid = ensure_session(request)
+    state = get_session_state(sid)
+    state["intro_seen"] = True
+    set_session_state(sid, state)
+    response = JSONResponse({"ok": True})
+    set_session_cookie(response, sid)
+    return response
+
+
+@app.get("/api/chat/state")
+async def chat_state(request: Request):
+    """Where this session's onboarding is, so a reload resumes the right question.
+
+    Without this the page always opened on "what's your name?" while the
+    server might be three questions further on, and the name got filed as a
+    job title.
+    """
+    sid = ensure_session(request)
+    state = get_session_state(sid)
+    state.setdefault("step_num", 0)
+    state.setdefault("data", {})
+    if state["step_num"] >= len(ONBOARD_STEPS):
+        return _chat_reply(sid, "You're all set — head to your dashboard.",
+                           state["step_num"], "redirect:/dashboard")
+    return _chat_reply(sid, *_next_prompt(state))
 
 
 def _chat_reply(sid: str, reply: str, step_num: int, action: str | None = None):
@@ -528,6 +558,7 @@ async def chat(request: Request):
 
     state["step_num"] = step_num + 1
     state["data"] = data
+    state["intro_seen"] = True   # answering anything means they've been past it
     set_session_state(sid, state)
 
     # Answering the last question is the sign-up.
