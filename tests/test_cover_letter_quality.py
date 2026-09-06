@@ -133,7 +133,7 @@ def test_filler_adverbs_are_caught_together():
 
 def test_em_dashes_and_false_contrasts_are_caught():
     assert any("em dash" in i for i in find_slop("I build things — good ones."))
-    assert any("not just" in i for i in
+    assert any("binary contrast" in i for i in
                find_slop("This is not just a job, but a calling."))
 
 
@@ -230,3 +230,66 @@ def test_the_prompt_carries_the_resume_and_the_voice_rules(drafts):
 
     user = messages.calls[0]["messages"][0]["content"]
     assert "Staff PM" in user and "Acme" in user and "Own billing." in user
+
+
+# ── The rest of the /no-ai-slop rule set ───────────────────────────────────
+
+@pytest.mark.parametrize("word", [
+    "foster", "utilize", "facilitate", "empower", "streamline", "robust",
+    "harness", "elevate", "embark", "supercharge", "transformative",
+    "meticulous", "intricate", "paramount", "multifaceted", "realm", "beacon",
+])
+def test_the_full_banned_word_list_is_caught(word):
+    assert any(word in issue for issue in find_slop(f"I would {word} the work."))
+
+
+@pytest.mark.parametrize("adverb", [
+    "fundamentally", "importantly", "crucially", "inherently", "inevitably",
+])
+def test_the_added_filler_adverbs_are_caught(adverb):
+    issues = find_slop(f"This {adverb} changed how the team shipped.")
+    assert any(i.startswith("filler adverbs") and adverb in i for i in issues)
+
+
+def test_a_trailing_ing_clause_is_caught():
+    assert any("-ing" in i for i in
+               find_slop("I rebuilt the pipeline, showcasing my range."))
+
+
+@pytest.mark.parametrize("puffery", [
+    "My record stands as a testament to that.",
+    "This work plays a vital role in the org.",
+    "It underscores my commitment to the craft.",
+])
+def test_importance_puffery_is_caught(puffery):
+    assert find_slop(puffery), puffery
+
+
+def test_summary_recap_endings_are_caught():
+    letter = "I shipped the thing.\nIn conclusion, I am a strong fit."
+    assert any("summary-recap" in i for i in find_slop(letter))
+
+
+def test_it_is_not_x_it_is_y_is_caught():
+    assert any("binary contrast" in i for i in
+               find_slop("It's not about the title, it's about the work."))
+
+
+def test_the_prompt_bans_the_whole_list():
+    """The model should avoid these on the first pass, not only on revision."""
+    from apply.cover_letter import VOICE_RULES
+    for word in ("foster", "utilize", "harness", "robust", "transformative",
+                 "elevate", "streamline"):
+        assert word in VOICE_RULES.lower(), word
+
+
+def test_a_normal_technical_letter_still_passes_clean():
+    """The stricter list must not flag ordinary, specific writing."""
+    letter = (
+        "I cut Acme's checkout latency from 900ms to 210ms by rewriting the "
+        "pricing path in Go, then shipped it to 2M daily users over a quarter. "
+        "Before that I ran the payments team at Bolt, where we moved settlement "
+        "from two days to four hours. Your posting describes the same scaling "
+        "problem on payments, and that is the work I want to keep doing."
+    )
+    assert find_slop(letter) == []

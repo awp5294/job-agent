@@ -54,7 +54,7 @@ BUZZWORDS = [
     (r"\btapestry\b", "tapestry"),
     (r"\bseamless(ly)?\b", "seamless"),
     (r"\bholistic(ally)?\b", "holistic"),
-    (r"\bparadigm\b", "paradigm"),
+    (r"\bparadigm( shift)?\b", "paradigm"),
     (r"\bcutting[- ]edge\b", "cutting-edge"),
     (r"\bbest[- ]in[- ]class\b", "best-in-class"),
     (r"\bresults[- ]driven\b", "results-driven"),
@@ -69,6 +69,25 @@ BUZZWORDS = [
     (r"\bdeep dive\b", "deep dive"),
     (r"\bmove the needle\b", "move the needle"),
     (r"\bgame[- ]chang(er|ing)\b", "game-changer"),
+    # The rest of the /no-ai-slop banned list.
+    (r"\bfoster(ing|ed)?\b", "foster"),
+    (r"\butiliz(e|ing|ed|ation)\b", "utilize"),
+    (r"\bfacilitat(e|ing|ed)\b", "facilitate"),
+    (r"\bempower(ing|ed|ment)?\b", "empower"),
+    (r"\bstreamlin(e|ing|ed)\b", "streamline"),
+    (r"\brobust\b", "robust"),
+    (r"\bharness(ing|ed)?\b", "harness"),
+    (r"\belevat(e|ing|ed)\b", "elevate"),
+    (r"\bembark(ing|ed)?\b", "embark"),
+    (r"\bsupercharg(e|ing|ed)\b", "supercharge"),
+    (r"\btransformative\b", "transformative"),
+    (r"\bever[- ]evolving\b", "ever-evolving"),
+    (r"\bmultifaceted\b", "multifaceted"),
+    (r"\bmeticulous(ly)?\b", "meticulous"),
+    (r"\bintricate(ly)?\b", "intricate"),
+    (r"\bparamount\b", "paramount"),
+    (r"\brealm\b", "realm"),
+    (r"\bbeacon\b", "beacon"),
 ]
 
 # Intensifiers that add nothing. Not every adverb, just the empty ones.
@@ -76,6 +95,7 @@ FILLER_ADVERBS = [
     "truly", "deeply", "genuinely", "incredibly", "extremely", "really",
     "very", "highly", "significantly", "substantially", "effectively",
     "successfully", "seamlessly", "particularly", "absolutely",
+    "fundamentally", "importantly", "crucially", "inherently", "inevitably",
 ]
 
 VAGUE_CLAIMS = [
@@ -86,12 +106,31 @@ VAGUE_CLAIMS = [
     (r"\bmany different\b", '"many different"'),
 ]
 
+# Sentence-shape tells, not single words.
+PHRASE_PATTERNS = [
+    # Superficial -ing clauses that gesture at meaning instead of stating it.
+    (r",\s+(highlight|underscor|showcas|reflect|demonstrat|underlin)(ing)\b",
+     'a trailing "-ing" clause (highlighting/underscoring/showcasing) that explains nothing'),
+    # Importance puffery: telling the reader it matters instead of showing it.
+    (r"\bstands as a testament\b|\ba testament to\b", '"a testament to"'),
+    (r"\bmarks a (pivotal|defining) moment\b", '"marks a pivotal moment"'),
+    (r"\bplays a (vital|key|crucial|pivotal|central) role\b", '"plays a vital role"'),
+    (r"\bunderscor(es|ing) (my|the|its)\b", '"underscores my/its..."'),
+    (r"\bsolidif(y|ies|ied)\b", '"solidify"'),
+    # Summary-recap openers on a fresh line.
+    (r"(^|\n)\s*(In conclusion|Ultimately|Overall|In summary|All in all)\b",
+     'a summary-recap ending ("In conclusion", "Ultimately", "Overall")'),
+    # Rhetorical setups.
+    (r"\bWhat if I told you\b|\bThink about it\b|\bPlot twist\b",
+     "a rhetorical setup"),
+]
+
 
 def find_slop(text: str) -> list[str]:
     """Every AI tell still in the draft, described so the model can fix it."""
     issues: list[str] = []
 
-    for pattern, description in STOCK_OPENERS + STOCK_CLOSERS + VAGUE_CLAIMS:
+    for pattern, description in STOCK_OPENERS + STOCK_CLOSERS + VAGUE_CLAIMS + PHRASE_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
             issues.append(description)
 
@@ -109,8 +148,10 @@ def find_slop(text: str) -> list[str]:
     if "—" in text or "–" in text:
         issues.append("em dashes, which read as machine-written")
 
-    if re.search(r"\bnot (just |only )?[^.!?,]{3,40}, but\b", text, re.IGNORECASE):
-        issues.append('a "not just X, but Y" construction')
+    # Binary contrasts: "not X, but Y" / "it's not X, it's Y" / "isn't X, it's Y".
+    if re.search(r"\bnot (just |only )?[^.!?,]{3,40}, but\b", text, re.IGNORECASE) or \
+       re.search(r"\b(it'?s |it is )?(not|isn'?t)\b[^.!?]{3,50},?\s+it'?s\b", text, re.IGNORECASE):
+        issues.append('a "not X, but Y" binary contrast')
 
     if re.search(r"^\s*(Dear|To whom)", text, re.IGNORECASE):
         issues.append("a salutation, which was not asked for")
@@ -170,11 +211,17 @@ VOICE_RULES = """How to write it:
 - Cut every adverb that isn't doing work: truly, deeply, genuinely,
   significantly, effectively, seamlessly.
 - No em dashes. Use a comma or start a new sentence.
-- No "not just X, but Y" constructions, no rhetorical questions, no lines
-  written to sound quotable.
+- No "not X, but Y" contrasts, no rhetorical questions, no lines written to
+  sound quotable, no closing that sums up what you just said.
+- Don't gesture at importance ("a testament to", "plays a vital role",
+  "underscores my") or tack on "-ing" clauses that explain nothing
+  ("..., highlighting my passion"). State the fact and stop.
 - Never use: leverage, synergy, spearhead, delve, seamless, holistic,
   cutting-edge, results-driven, team player, proven track record, wealth of
-  experience, hit the ground running, fast-paced, passionate, excited, thrilled.
+  experience, hit the ground running, fast-paced, passionate, excited,
+  thrilled, foster, utilize, facilitate, empower, streamline, robust, harness,
+  elevate, embark, supercharge, transformative, meticulous, intricate,
+  paramount, multifaceted, realm, beacon.
 - Don't close by thanking them or saying you look forward to hearing back.
   End on something about the work.
 - Sound like a competent person who spent twenty minutes on it, not like a
