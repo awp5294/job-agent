@@ -7,7 +7,7 @@ from google.genai import errors as genai_errors
 
 import llm
 from apply.cover_letter import generate_cover_letter
-from llm import LLMError
+from llm import Credentials, LLMError
 from matching.scorer import JobScore, score_job
 
 JOB = {
@@ -177,3 +177,82 @@ def test_a_scoring_failure_still_does_not_crash_the_digest(gemini):
     score, reason = score_job(JOB, CRITERIA)
     assert score == 0
     assert "rejected the API key" in reason
+
+
+# ── Model auto-discovery when the default isn't on a key ────────────────────
+# Free AI Studio keys don't all carry gemini-2.5-flash. The app should find a
+# model the key does have rather than failing the whole digest.
+
+from google.genai import errors as genai_errors  # noqa: E402
+
+
+def _model(name):
+    return SimpleNamespace(name=name, supported_actions=["generateContent"])
+
+
+class DiscoverModels:
+    """Rejects the default model, offers others via list()."""
+    def __init__(self, available, missing="gemini-2.5-flash"):
+        self.available, self.missing, self.calls = available, missing, []
+
+    def list(self):
+        return [_model(n) for n in self.available] + [
+            SimpleNamespace(name="models/text-embedding-004",
+                            supported_actions=["embedContent"])]
+
+    def generate_content(self, *, model, contents, config):
+        self.calls.append(model)
+        if model == self.missing:
+            raise genai_errors.ClientError(
+                404, {"error": {"message": f"models/{model} was not found",
+                                "status": "NOT_FOUND"}})
+        return gemini_response(parsed=JobScore(score=91, reason="fits"),
+                               text='{"score":91,"reason":"fits"}')
+
+
+@pytest.fixture
+def discovering(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "AIza-discover")
+    llm.reset_client()
+
+    def install(available):
+        models = DiscoverModels(available)
+        client = SimpleNamespace(models=models)
+        monkeypatch.setattr(llm, "_build_client", lambda creds: client)
+        monkeypatch.setattr(llm, "get_client", lambda: client)
+        return models
+    yield install
+    llm.reset_client()
+
+
+def test_a_missing_default_falls_back_to_an_available_flash(discovering):
+    models = discovering(["models/gemini-2.0-flash", "models/gemini-2.5-pro"])
+    result = llm.complete_json(system="s", prompt="p", schema=JobScore,
+                               credentials=Credentials("gemini", "AIza-discover"))
+    assert result.score == 91
+    # Tried the default, then the discovered flash.
+    assert models.calls == ["gemini-2.5-flash", "gemini-2.0-flash"]
+
+
+def test_flash_is_preferred_over_pro_when_both_exist(discovering):
+    models = discovering(["models/gemini-2.5-pro", "models/gemini-2.0-flash"])
+    llm.complete_json(system="s", prompt="p", schema=JobScore,
+                      credentials=Credentials("gemini", "AIza-discover"))
+    assert models.calls[-1] == "gemini-2.0-flash"
+
+
+def test_the_discovered_model_is_reused_not_rediscovered(discovering):
+    models = discovering(["models/gemini-2.0-flash"])
+    creds = Credentials("gemini", "AIza-discover")
+    llm.complete_json(system="s", prompt="p", schema=JobScore, credentials=creds)
+    models.calls.clear()
+    llm.complete_text(system="s", prompt="p", credentials=creds)
+    assert models.calls == ["gemini-2.0-flash"], "should skip the dead default"
+
+
+def test_a_key_with_no_gemini_model_gives_a_clear_error(discovering):
+    discovering([])  # only the embedding model, no generateContent gemini
+    with pytest.raises(LLMError, match="no Gemini model available"):
+        llm.complete_text(system="s", prompt="p",
+                          credentials=Credentials("gemini", "AIza-discover"))
