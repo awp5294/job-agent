@@ -79,14 +79,17 @@ DIGEST_LIMIT = int(os.environ.get("DIGEST_LIMIT", "10"))
 # How often to check for replies to a digest.
 REPLY_POLL_MINUTES = int(os.environ.get("REPLY_POLL_MINUTES", "15"))
 
-# New accounts start watching these company job boards, so a friend gets real
-# matches from onboarding alone without knowing what a "board slug" is. They
-# can add or remove companies in Settings afterwards.
+# These seed a new account so a friend gets matches from onboarding alone.
+# Companies move between hiring platforms, so a slug can 404 later; a 404 is
+# logged in the digest notes and skipped, it doesn't fail the run. (Dropped
+# from the defaults after they 404'd: doordash on Greenhouse; plaid, ramp and
+# attentive on Lever.) Remotive's keyword search is what actually carries a
+# new user, so the digest doesn't depend on this list being current.
 DEFAULT_GREENHOUSE_COMPANIES = [
-    "stripe", "airbnb", "doordash", "coinbase", "robinhood", "instacart",
+    "stripe", "airbnb", "coinbase", "robinhood", "instacart",
     "reddit", "dropbox", "gitlab", "databricks", "anthropic", "discord",
 ]
-DEFAULT_LEVER_COMPANIES = ["plaid", "ramp", "attentive"]
+DEFAULT_LEVER_COMPANIES = ["netflix", "spotify", "lever"]
 
 signer = URLSafeSerializer(SECRET_KEY)
 scheduler = AsyncIOScheduler(timezone=TIMEZONE)
