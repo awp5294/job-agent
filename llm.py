@@ -159,6 +159,7 @@ def reset_client():
     global _client, _client_provider
     _client, _client_provider = None, None
     _clients.clear()
+    _gemini_model_cache.clear()
 
 
 def _build_client(credentials: Credentials):
@@ -254,9 +255,14 @@ def _raise_friendly(exc: Exception, provider: str) -> LLMError:
             if "API_KEY_INVALID" in message or "API key not valid" in message:
                 return LLMError("Google rejected the API key.")
             if "NOT_FOUND" in message or "not found" in message.lower():
+                # The app tries to discover a working model before this fires,
+                # so reaching here means the key has no usable Gemini model at
+                # all. Don't name a model — get_model() reads the server key,
+                # which is not this caller's key.
                 return LLMError(
-                    f"Gemini model {get_model()!r} was not found for this key. "
-                    "Set GEMINI_MODEL to a model you have access to."
+                    "This Google key has no Gemini model available for scoring. "
+                    "Set GEMINI_MODEL to a model you have access to, or use a "
+                    "different key."
                 )
             if "RESOURCE_EXHAUSTED" in message or "429" in message:
                 return LLMError("Rate limited by Google — try again shortly.")
@@ -408,6 +414,63 @@ def _anthropic_text(client, model, system, prompt, max_tokens, effort):
 
 
 # ── Gemini backend ─────────────────────────────────────────────────────────
+# Free AI Studio keys don't all carry the same models: one key has
+# gemini-2.5-flash, another only 2.0. Rather than fail the whole digest when the
+# default name isn't on a key, discover a model the key actually has and use it.
+# The chosen model is remembered per client, so this costs one extra list() the
+# first time a key hits a missing model and nothing after.
+
+_gemini_model_cache: dict[int, str] = {}
+
+
+def _discover_gemini_model(client) -> str | None:
+    """A model this key can call generateContent on. Prefers a cheap flash."""
+    try:
+        models = list(client.models.list())
+    except Exception:
+        return None
+
+    def usable(model) -> bool:
+        actions = (getattr(model, "supported_actions", None)
+                   or getattr(model, "supported_generation_methods", None) or [])
+        return not actions or "generateContent" in actions
+
+    names = [m.name.split("/")[-1] for m in models
+             if "gemini" in m.name and usable(m)]
+    # Prefer a plain flash (cheapest, fine for scoring), newest version first.
+    flash = [n for n in names
+             if "flash" in n and "lite" not in n and "thinking" not in n]
+    pick = sorted(flash or names, reverse=True)
+    return pick[0] if pick else None
+
+
+def _gemini_not_found(exc: Exception) -> bool:
+    message = str(exc)
+    return "NOT_FOUND" in message or "not found" in message.lower()
+
+
+def _gemini_generate(client, model, *, contents, config):
+    """generate_content, but if the model isn't on this key, find one that is.
+
+    Detection reads the raw provider error, not the friendly message, so it
+    doesn't depend on anything but what Google actually returned.
+    """
+    effective = _gemini_model_cache.get(id(client), model)
+    try:
+        return client.models.generate_content(
+            model=effective, contents=contents, config=config)
+    except Exception as err:
+        if _gemini_not_found(err):
+            discovered = _discover_gemini_model(client)
+            if discovered and discovered != effective:
+                _gemini_model_cache[id(client)] = discovered
+                try:
+                    return client.models.generate_content(
+                        model=discovered, contents=contents, config=config)
+                except Exception as retry_err:
+                    raise _raise_friendly(retry_err, "gemini") from retry_err
+        raise _raise_friendly(err, "gemini") from err
+
 
 def _gemini_config(system: str, max_tokens: int, schema=None):
     from google.genai import types
@@ -431,9 +494,8 @@ def _gemini_blocked(response) -> str | None:
 
 
 def _gemini_json(client, model, system, prompt, schema, max_tokens):
-    response = _call(
-        client.models.generate_content, "gemini",
-        model=model,
+    response = _gemini_generate(
+        client, model,
         contents=prompt,
         config=_gemini_config(system, max_tokens, schema),
     )
@@ -451,9 +513,8 @@ def _gemini_json(client, model, system, prompt, schema, max_tokens):
 
 
 def _gemini_text(client, model, system, prompt, max_tokens):
-    response = _call(
-        client.models.generate_content, "gemini",
-        model=model,
+    response = _gemini_generate(
+        client, model,
         contents=prompt,
         config=_gemini_config(system, max_tokens),
     )
