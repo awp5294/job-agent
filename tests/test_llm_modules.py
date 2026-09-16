@@ -169,10 +169,13 @@ def test_only_jobs_over_the_threshold_are_kept(monkeypatch):
     monkeypatch.setattr("matching.scorer.score_job",
                         lambda job, criteria, credentials=None: next(scores))
 
-    jobs = [dict(JOB, id=i, title=f"Job {i}") for i in (1, 2, 3)]
+    # Titles must clear the prefilter (they match the criteria) so the point
+    # under test is the score threshold, not relevance.
+    jobs = [dict(JOB, id=i, title=f"Product Manager {i}") for i in (1, 2, 3)]
     kept = score_jobs_for_user(jobs, user_id=1, criteria=CRITERIA)
 
-    assert [(j["title"], s) for j, s, _ in kept] == [("Job 1", 91), ("Job 3", 70)]
+    assert [(j["title"], s) for j, s, _ in kept] == \
+        [("Product Manager 1", 91), ("Product Manager 3", 70)]
 
 
 def test_jobs_that_failed_to_store_are_skipped(monkeypatch):
@@ -212,3 +215,67 @@ def test_cover_letter_failures_surface_to_the_caller(fake_llm):
 def test_stop_slop_leaves_clean_prose_alone():
     text = "I led the ledger migration at Acme. It cut settlement time in half."
     assert stop_slop(text) == text
+
+
+# ── Prefilter: don't LLM-score thousands of postings ───────────────────────
+
+from matching.scorer import prefilter_jobs  # noqa: E402
+
+
+def _jobs(titles):
+    return [{"id": i + 1, "title": t, "company": "Acme"} for i, t in enumerate(titles)]
+
+
+def test_prefilter_keeps_only_title_relevant_postings():
+    jobs = _jobs(["Warehouse Associate", "Senior Product Manager",
+                  "Line Cook", "Product Manager, Payments"])
+    picked = prefilter_jobs(jobs, {"job_titles": ["Product Manager"]}, limit=50)
+    kept = {j["title"] for j in picked}
+    assert kept == {"Senior Product Manager", "Product Manager, Payments"}
+
+
+def test_prefilter_caps_the_number_scored():
+    jobs = _jobs(["Product Manager"] * 500)
+    assert len(prefilter_jobs(jobs, {"job_titles": ["Product Manager"]}, limit=50)) == 50
+
+
+def test_prefilter_ranks_stronger_title_overlap_first():
+    jobs = _jobs(["Manager", "Senior Product Manager, Growth"])
+    picked = prefilter_jobs(jobs, {"job_titles": ["Senior Product Manager"]}, limit=1)
+    assert picked[0]["title"] == "Senior Product Manager, Growth"
+
+
+def test_prefilter_drops_exclude_keyword_hits():
+    jobs = _jobs(["Product Manager, Crypto", "Product Manager, Payments"])
+    picked = prefilter_jobs(jobs, {"job_titles": ["Product Manager"],
+                                   "keywords_exclude": ["crypto"]}, limit=50)
+    assert [j["title"] for j in picked] == ["Product Manager, Payments"]
+
+
+def test_prefilter_counts_include_keywords_when_titles_are_generic():
+    jobs = _jobs(["Manager at Fintech", "Manager at Healthcare"])
+    picked = prefilter_jobs(jobs, {"job_titles": [], "keywords_include": ["fintech"]},
+                            limit=50)
+    assert [j["title"] for j in picked] == ["Manager at Fintech"]
+
+
+def test_prefilter_with_no_criteria_keeps_the_first_n():
+    jobs = _jobs([f"Role {i}" for i in range(80)])
+    picked = prefilter_jobs(jobs, {}, limit=50)
+    assert len(picked) == 50 and picked[0]["title"] == "Role 0"
+
+
+def test_scoring_only_calls_the_model_for_prefiltered_jobs(monkeypatch):
+    """The whole point: a rate-limited key isn't asked to score thousands."""
+    scored_titles = []
+
+    def fake_score(job, criteria, credentials=None):
+        scored_titles.append(job["title"])
+        return 91, "fit"
+    monkeypatch.setattr("matching.scorer.score_job", fake_score)
+    monkeypatch.setattr("matching.scorer.MAX_TO_SCORE", 50)
+
+    jobs = _jobs(["Warehouse"] * 3000 + ["Product Manager"] * 5)
+    kept = score_jobs_for_user(jobs, user_id=1, criteria={"job_titles": ["Product Manager"]})
+    assert len(scored_titles) == 5, "only the 5 relevant postings should be scored"
+    assert len(kept) == 5
