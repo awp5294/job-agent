@@ -172,16 +172,18 @@ def test_only_jobs_over_the_threshold_are_kept(monkeypatch):
     # Titles must clear the prefilter (they match the criteria) so the point
     # under test is the score threshold, not relevance.
     jobs = [dict(JOB, id=i, title=f"Product Manager {i}") for i in (1, 2, 3)]
-    kept = score_jobs_for_user(jobs, user_id=1, criteria=CRITERIA)
+    kept, stats = score_jobs_for_user(jobs, user_id=1, criteria=CRITERIA)
 
     assert [(j["title"], s) for j, s, _ in kept] == \
         [("Product Manager 1", 91), ("Product Manager 3", 70)]
+    assert stats["best"] == 91 and stats["scored"] == 3
 
 
 def test_jobs_that_failed_to_store_are_skipped(monkeypatch):
     monkeypatch.setattr("matching.scorer.score_job",
                         lambda job, criteria, credentials=None: pytest.fail("should not be scored"))
-    assert score_jobs_for_user([{"title": "No id"}], 1, CRITERIA) == []
+    kept, stats = score_jobs_for_user([{"title": "No id"}], 1, CRITERIA)
+    assert kept == [] and stats["candidates"] == 0
 
 
 # ── Cover letters ──────────────────────────────────────────────────────────
@@ -276,6 +278,39 @@ def test_scoring_only_calls_the_model_for_prefiltered_jobs(monkeypatch):
     monkeypatch.setattr("matching.scorer.MAX_TO_SCORE", 50)
 
     jobs = _jobs(["Warehouse"] * 3000 + ["Product Manager"] * 5)
-    kept = score_jobs_for_user(jobs, user_id=1, criteria={"job_titles": ["Product Manager"]})
+    kept, stats = score_jobs_for_user(jobs, user_id=1, criteria={"job_titles": ["Product Manager"]})
     assert len(scored_titles) == 5, "only the 5 relevant postings should be scored"
-    assert len(kept) == 5
+    assert len(kept) == 5 and stats["scored"] == 5
+
+
+# ── The digest explains an empty result instead of just "0 matched" ─────────
+
+from matching.scorer import explain_no_matches  # noqa: E402
+
+
+def test_no_candidates_blames_the_titles():
+    msg = explain_no_matches({"candidates": 0})
+    assert "titles" in msg.lower()
+
+
+def test_all_errored_blames_rate_limiting():
+    msg = explain_no_matches({"candidates": 50, "scored": 0, "errored": 50})
+    assert "rate-limited" in msg.lower()
+
+
+def test_scored_but_under_bar_reports_the_best():
+    msg = explain_no_matches({"candidates": 50, "scored": 50, "errored": 0,
+                              "best": 62, "threshold": 70})
+    assert "62%" in msg and "70%" in msg
+
+
+def test_the_threshold_can_be_lowered_by_env(monkeypatch):
+    import importlib
+    monkeypatch.setenv("MATCH_THRESHOLD", "55")
+    import matching.scorer as scorer
+    importlib.reload(scorer)
+    try:
+        assert scorer.MATCH_THRESHOLD == 55
+    finally:
+        monkeypatch.delenv("MATCH_THRESHOLD", raising=False)
+        importlib.reload(scorer)

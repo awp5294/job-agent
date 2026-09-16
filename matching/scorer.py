@@ -6,8 +6,9 @@ from pydantic import BaseModel, Field
 
 from llm import Credentials, LLMError, complete_json
 
-# Only jobs at or above this score make it into a digest.
-MATCH_THRESHOLD = 70
+# Only jobs at or above this score make it into a digest. Configurable because
+# a narrow search on a quiet day can leave the bar higher than anything clears.
+MATCH_THRESHOLD = int(os.getenv("MATCH_THRESHOLD", "70"))
 
 # Each posting scored costs one LLM call, and a free key is rate-limited, so a
 # day's sourcing (thousands of postings) can't all be scored: most calls would
@@ -55,6 +56,7 @@ def prefilter_jobs(all_jobs: list[dict], criteria: dict, limit: int) -> list[dic
 
     scored.sort(reverse=True)
     return [job for _, _, job in scored[:limit]]
+
 
 SYSTEM = """You score job postings against a candidate's stated criteria.
 
@@ -126,17 +128,47 @@ def score_job(job: dict, criteria: dict,
 
 
 def score_jobs_for_user(all_jobs: list[dict], user_id: int, criteria: dict,
-                        credentials: Credentials | None = None) -> list[tuple[dict, int, str]]:
+                        credentials: Credentials | None = None
+                        ) -> tuple[list[tuple[dict, int, str]], dict]:
     """Score the most relevant postings and keep those at or above the threshold.
 
     Only the top MAX_TO_SCORE candidates (by cheap local relevance) are sent to
     the model, so a free, rate-limited key isn't asked to score thousands of
     postings and throttled into matching nothing.
+
+    Returns (kept, stats). `stats` explains a thin result: how many postings
+    cleared the relevance prefilter, how many the model actually scored, the
+    best score it gave, and how many errored (a rate-limited key shows up here).
     """
     candidates = prefilter_jobs(all_jobs, criteria, MAX_TO_SCORE)
-    results = []
+    kept, best, errors = [], 0, 0
     for job in candidates:
         score, reason = score_job(job, criteria, credentials)
+        if reason.startswith("Could not score"):
+            errors += 1
+            continue
+        best = max(best, score)
         if score >= MATCH_THRESHOLD:
-            results.append((job, score, reason))
-    return results
+            kept.append((job, score, reason))
+    stats = {
+        "candidates": len(candidates),
+        "scored": len(candidates) - errors,
+        "errored": errors,
+        "best": best,
+        "threshold": MATCH_THRESHOLD,
+    }
+    return kept, stats
+
+
+def explain_no_matches(stats: dict) -> str:
+    """A plain sentence for a digest that found nothing to send."""
+    if stats.get("candidates", 0) == 0:
+        return ("No postings matched your job titles closely enough to score. "
+                "Broaden the titles in Settings, or add a company to watch.")
+    if stats.get("scored", 0) == 0 and stats.get("errored", 0):
+        return ("Your AI key was rate-limited before it could score anything. "
+                "Wait a few minutes and run it again, or use a paid key.")
+    best, threshold = stats.get("best", 0), stats.get("threshold", MATCH_THRESHOLD)
+    return (f"Scored {stats.get('scored', 0)} postings; the best was {best}%, "
+            f"under the {threshold}% bar. Loosen your criteria (titles, salary "
+            "floor, locations) to let more through.")
