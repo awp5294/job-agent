@@ -227,7 +227,8 @@ def test_scoring_receives_the_users_own_credentials(signed_up, browser, no_netwo
 
     def fake_score(all_jobs, user_id, criteria, credentials=None):
         received.append(credentials)
-        return []
+        return [], {"candidates": 0, "scored": 0, "errored": 0,
+                    "best": 0, "threshold": 70}
     monkeypatch.setattr(server, "score_jobs_for_user", fake_score)
 
     import asyncio

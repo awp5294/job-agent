@@ -57,7 +57,7 @@ from llm import (
 )
 from llm import describe as llm_describe
 from secretbox import SecretBoxError, seal, unseal
-from matching.scorer import score_jobs_for_user
+from matching.scorer import explain_no_matches, score_jobs_for_user
 from sourcing.greenhouse import fetch_greenhouse_jobs
 from sourcing.indeed import fetch_indeed_jobs
 from sourcing.lever import fetch_lever_jobs
@@ -1071,7 +1071,7 @@ async def run_digest_for_user(user_id: int) -> dict:
             problems.append(f"store {job.get('title')!r}: {exc}")
 
     try:
-        scored = await asyncio.to_thread(
+        scored, score_stats = await asyncio.to_thread(
             score_jobs_for_user, all_jobs, user_id, criteria, credentials
         )
     except Exception as exc:
@@ -1086,11 +1086,14 @@ async def run_digest_for_user(user_id: int) -> dict:
     # and goes out in a later digest, so nothing is lost.
     unsent = get_unsent_user_jobs(user_id)[:DIGEST_LIMIT]
     if not unsent:
+        # Say why nothing is going out — rate-limited key, too-narrow titles, or
+        # everything scored under the bar — so it's actionable, not a dead end.
+        note = "; ".join(filter(None, [explain_no_matches(score_stats),
+                                       "; ".join(problems)]))
         finish_digest_run(
-            run_id, "ok", len(all_jobs), len(scored),
-            message="; ".join(problems) or "No new matches to send.",
+            run_id, "ok", len(all_jobs), len(scored), message=note,
         )
-        return {"status": "ok", "sent": 0}
+        return {"status": "ok", "sent": 0, "stats": score_stats}
 
     email_sent, email_note = await asyncio.to_thread(_send_digest, user, unsent)
     if email_sent:

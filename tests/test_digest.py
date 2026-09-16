@@ -46,7 +46,8 @@ def stub_sources(monkeypatch):
         for job in all_jobs:
             if "Product Manager" in job["title"] or "PM" in job["title"]:
                 results.append((job, 91, "Title matches a target role."))
-        return results
+        return results, {"candidates": len(all_jobs), "scored": len(all_jobs),
+                         "errored": 0, "best": 91, "threshold": 70}
 
     monkeypatch.setattr(server, "score_jobs_for_user", fake_score)
 
@@ -123,8 +124,10 @@ def test_digest_sends_ten_jobs_and_saves_the_rest_for_next_time(signed_up, sent_
     # Descending scores, so the cut is by quality rather than arbitrary.
     monkeypatch.setattr(
         server, "score_jobs_for_user",
-        lambda jobs, uid, crit, credentials=None: [(j, 99 - i, "match")
-                                                    for i, j in enumerate(jobs)],
+        lambda jobs, uid, crit, credentials=None: (
+            [(j, 99 - i, "match") for i, j in enumerate(jobs)],
+            {"candidates": len(jobs), "scored": len(jobs), "errored": 0,
+             "best": 99, "threshold": 70}),
     )
 
     user = database.get_user_by_email("ada@example.com")
@@ -166,7 +169,10 @@ def test_digest_records_source_failures_instead_of_swallowing_them(signed_up, mo
     monkeypatch.setattr(server, "fetch_lever_jobs", lambda slug: [])
     monkeypatch.setattr(server, "fetch_indeed_jobs", lambda t, l: [])
     monkeypatch.setattr(server, "fetch_remotive_jobs", lambda titles: [])
-    monkeypatch.setattr(server, "score_jobs_for_user", lambda j, u, c, credentials=None: [])
+    monkeypatch.setattr(server, "score_jobs_for_user",
+                        lambda j, u, c, credentials=None: (
+                            [], {"candidates": 0, "scored": 0, "errored": 0,
+                                 "best": 0, "threshold": 70}))
 
     asyncio.run(server.run_digest_for_user(user["id"]))
     run = database.get_latest_digest_run(user["id"])
